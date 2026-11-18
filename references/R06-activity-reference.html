@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VEXORA — Activity display reference</title>
+<style>
+  :root {
+    --bg: #0e0e10;
+    --panel: #151517;
+    --text: #f2f2f3;
+    --muted: #8e8e93;
+    --faint: #5d5d62;
+    --line: #2c2c30;
+    --blue: #5aa9f0;
+    --green: #4fc38a;
+    --orange: #d28c4c;
+    --accent: #6bb34f;
+    --accent-ink: #12301a;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; background: #000; color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Arabic", "Noto Sans", sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  button { font: inherit; color: inherit; }
+
+  .phone {
+    position: relative; max-width: 440px; height: 100dvh; margin: 0 auto;
+    display: flex; flex-direction: column; background: var(--bg);
+    border-inline: 1px solid #1c1c1f;
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  /* ---------- chat area ---------- */
+  .chatwrap { position: relative; flex: 1; min-height: 0; }
+  .chat { height: 100%; overflow-y: auto; padding: 18px 18px 28px; overscroll-behavior: contain; }
+  .empty {
+    color: var(--faint); text-align: center; margin: 22vh 24px 0; font-size: 15px; line-height: 1.6;
+  }
+  .empty b { color: var(--muted); font-weight: 600; }
+
+  .user {
+    width: fit-content; max-width: 88%; margin: 0 0 18px auto;
+    background: #1d1d20; border-radius: 16px; padding: 10px 14px;
+    font-size: 16px; line-height: 1.5; unicode-bidi: plaintext; white-space: pre-wrap; word-break: break-word;
+  }
+
+  .turn { margin-bottom: 22px; }
+  .runhead {
+    display: flex; align-items: center; gap: 6px; padding: 4px 0; margin: 0 0 6px;
+    background: none; border: 0; cursor: pointer; color: var(--muted); font-size: 17px; line-height: 1.3;
+    text-align: start;
+  }
+  .runhead svg { width: 16px; height: 16px; flex: none; transition: transform .2s ease; }
+  .turn.collapsed .runhead svg { transform: rotate(-90deg); }
+  .runbody { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .25s ease; }
+  .turn.collapsed .runbody { grid-template-rows: 0fr; }
+  .runbody > .inner { overflow: hidden; min-height: 0; }
+
+  .txt { font-size: 17px; line-height: 1.55; margin: 14px 0; word-break: break-word; }
+  .txt code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .86em;
+    background: #232326; border: 1px solid #38383c; padding: 1px 6px; border-radius: 5px;
+  }
+  .final { margin-top: 16px; }
+
+  /* ---------- activity group (the part to copy) ---------- */
+  .grp { margin: 0; }
+  .grp-row {
+    display: flex; align-items: center; gap: 12px; padding: 5px 0; min-height: 29px;
+    color: var(--muted); font-size: 15.5px; line-height: 1.3; cursor: pointer;
+    -webkit-tap-highlight-color: transparent; outline: none; border-radius: 6px;
+  }
+  .grp-row:focus-visible { box-shadow: 0 0 0 2px #3b6ea8; }
+  .grp-row .ico { width: 19px; height: 19px; flex: none; display: grid; place-items: center; }
+  .grp-row .ico svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .grp-row .lbl { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .c-blue { color: var(--blue); } .c-green { color: var(--green); } .c-orange { color: var(--orange); }
+
+  .grp.running .lbl {
+    background: linear-gradient(90deg, #6c6c71 0%, #d6d6da 50%, #6c6c71 100%);
+    background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: shimmer 1.4s linear infinite;
+  }
+  .spinner {
+    width: 15px; height: 15px; border-radius: 50%;
+    border: 2px solid #3a3a3e; border-top-color: var(--blue); animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+
+  .detail { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .22s ease; }
+  .grp.open .detail { grid-template-rows: 1fr; }
+  .detail > .inner { overflow: hidden; min-height: 0; padding-inline-start: 31px; }
+  .dline {
+    display: flex; gap: 8px; align-items: baseline; color: #77777c; font-size: 13.5px; line-height: 1.5;
+    padding: 2px 0; min-width: 0;
+  }
+  .dline .k { flex: none; }
+  .dline .v {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: #9a9aa0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+  }
+  .grp.open .detail > .inner { padding-bottom: 6px; }
+
+  /* ---------- scroll-to-bottom ---------- */
+  .scrollbtn {
+    position: absolute; left: 50%; bottom: 12px; width: 40px; height: 40px; margin-left: -20px;
+    border-radius: 50%; background: #1b1b1e; border: 1.5px solid #3b3b40; color: var(--text);
+    display: grid; place-items: center; cursor: pointer; opacity: 0; pointer-events: none;
+    transform: translateY(6px); transition: opacity .2s ease, transform .2s ease;
+  }
+  .scrollbtn.show { opacity: 1; pointer-events: auto; transform: none; }
+  .scrollbtn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---------- composer ---------- */
+  .composer {
+    margin: 6px 12px calc(12px + env(safe-area-inset-bottom, 0px)); padding: 12px 14px 10px;
+    border: 1.5px solid #303034; border-radius: 22px; background: #101012;
+  }
+  .composer textarea {
+    display: block; width: 100%; min-height: 66px; max-height: 170px; resize: none;
+    background: transparent; border: 0; outline: 0; color: var(--text); font: inherit;
+    font-size: 16px; line-height: 1.55; padding: 0; unicode-bidi: plaintext;
+  }
+  .composer textarea::placeholder { color: var(--faint); opacity: 1; }
+  .suggest {
+    display: block; margin: 6px 0 0; padding: 6px 2px; background: none; border: 0; cursor: pointer;
+    color: var(--text); font-size: 15px;
+  }
+  .suggest[hidden] { display: none; }
+  .crow { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+  .plus {
+    width: 36px; height: 36px; border: 0; background: none; color: var(--muted);
+    display: grid; place-items: center; cursor: pointer; border-radius: 10px;
+  }
+  .plus svg, .go svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .go {
+    width: 48px; height: 38px; border: 0; border-radius: 11px; background: var(--accent); color: var(--accent-ink);
+    display: grid; place-items: center; cursor: pointer;
+  }
+  .go:active { filter: brightness(.92); }
+  .go.stop { background: #3a3a3f; color: var(--text); }
+
+  /* ---------- specs sheet ---------- */
+  .specbtn {
+    position: fixed; top: calc(8px + env(safe-area-inset-top, 0px)); inset-inline-end: 8px; z-index: 20;
+    background: #1b1b1e; border: 1px solid #3b3b40; color: var(--muted); border-radius: 999px;
+    padding: 6px 12px; font-size: 13px; cursor: pointer;
+  }
+  .spec {
+    position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,.72); display: none;
+    padding: calc(16px + env(safe-area-inset-top, 0px)) 16px 16px;
+  }
+  .spec.on { display: block; }
+  .spec .sheet {
+    max-width: 440px; max-height: 100%; margin: 0 auto; overflow-y: auto; background: #161618;
+    border: 1px solid #333338; border-radius: 18px; padding: 18px 18px 8px; direction: rtl; text-align: right;
+  }
+  .spec h2 { margin: 0 0 10px; font-size: 18px; }
+  .spec ul { margin: 0 0 12px; padding: 0 18px 0 0; }
+  .spec li { margin: 0 0 9px; line-height: 1.6; font-size: 14.5px; color: #d2d2d6; }
+  .spec li b { color: var(--text); }
+  .spec code { direction: ltr; unicode-bidi: embed; font-family: ui-monospace, Menlo, monospace; font-size: .9em; background: #232326; padding: 1px 5px; border-radius: 4px; }
+  .spec .close {
+    position: sticky; bottom: 0; display: block; width: 100%; margin: 8px 0 10px; padding: 11px;
+    background: #26262a; border: 0; border-radius: 12px; cursor: pointer;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  }
+</style>
+</head>
+<body>
+
+<button class="specbtn" id="specBtn" type="button">Specs</button>
+
+<div class="phone">
+  <div class="chatwrap">
+    <div class="chat" id="chat">
+      <div class="empty" id="empty">
+        <b>Reference mockup of the activity display.</b><br>
+        Type any message below and send it: the run will play out exactly like the screenshot.
+      </div>
+    </div>
+    <button class="scrollbtn" id="scrollBtn" type="button" aria-label="Scroll to bottom">
+      <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+  </div>
+
+  <div class="composer">
+    <textarea id="input" rows="3" dir="auto"
+      placeholder="راجع التعديل الذي أضفته بعين جديدة وبسّط ما يمكن تبسيطه، ثم أضف أنيميشن الكتابة التدريجية لطرفية /cli كما في الموقع الأصلي."></textarea>
+    <button class="suggest" id="suggest" type="button">Use suggestion</button>
+    <div class="crow">
+      <button class="plus" type="button" aria-label="Add"><svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></svg></button>
+      <button class="go" id="go" type="button" aria-label="Voice"></button>
+    </div>
+  </div>
+</div>
+
+<div class="spec" id="spec">
+  <div class="sheet">
+    <h2>مواصفات العرض (تقديرية من اللقطة)</h2>
+    <ul>
+      <li><b>سطر الرأس:</b> نص رمادي <code>Worked for 17m 53s</code> + سهم صغير، حجم ≈ 17px، لون <code>#8e8e93</code>. أثناء التشغيل يتحول إلى <code>Working for ...</code> مع مؤقت حي. الضغط عليه يطوي/يفتح كل نشاط الدور.</li>
+      <li><b>نص المساعد:</b> أبيض، ≈ 17px، ارتفاع سطر 1.55، والكود داخل شريحة (chip) صغيرة بخلفية داكنة وحدود رفيعة.</li>
+      <li><b>مجموعة النشاط:</b> سطر واحد فقط: أيقونة 19px + ملخص رمادي ≈ 15.5px، بدون إطار ولا خلفية ولا بطاقة. المسافة العمودية بين الأسطر ≈ 29px. النص يُقصّ بـ <code>…</code> إذا طال.</li>
+      <li><b>الأيقونة:</b> نجمة زرقاء = المجموعة فيها تفكير (thinking). غير ذلك حسب أول أداة: مقبس (plug) أزرق = متصفح/MCP، ملف أخضر = قراءة، ملف بقلم أخضر = تعديل، طرفية برتقالية = أوامر.</li>
+      <li><b>الملخص:</b> يُولَّد تلقائياً بترتيب أول ظهور، بدون أرقام: مفرد إذا أداة واحدة (<code>Ran a command</code>) وجمع إذا أكثر (<code>Ran commands</code>)، أول حرف كبير، والفواصل <code>,</code>.</li>
+      <li><b>أثناء التشغيل:</b> المجموعة الحالية فيها دائرة دوّارة ونص "ما يحدث الآن" (يلمع)، ثم تنطوي في ملخصها عند انتهائها.</li>
+      <li><b>الضغط على السطر:</b> يفتح التفاصيل (هنا أسطر مبسطة، وفي التطبيق تُعرض بطاقات الأدوات الأصلية بدون أي تغيير بمحتواها).</li>
+      <li><b>الأخطاء والموافقات:</b> لا تُطوى أبداً في التطبيق الحقيقي (غير ممثَّلة هنا).</li>
+      <li><b>زر النزول:</b> دائري 40px بسهم لأسفل، يظهر في منتصف الأسفل فوق حقل الإدخال عندما تبتعد عن آخر المحادثة.</li>
+      <li><b>حقل الإدخال:</b> إطار مدوّر بحد رفيع، الاقتراح كنص رمادي داخل الحقل، تحته <code>Use suggestion</code> كنص عادي، زر <code>+</code> على اليسار، وزر أخضر على اليمين: موجة صوت عند الفراغ ويتحول لسهم إرسال عند الكتابة (ومربع إيقاف أثناء التشغيل).</li>
+    </ul>
+    <button class="close" id="specClose" type="button">Close</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ---------- icons (24x24, stroke) ---------- */
+  const svg = (inner) => `<svg viewBox="0 0 24 24" aria-hidden="true">${inner}</svg>`;
+  const ICONS = {
+    sparkle: svg('<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>'),
+    plug: svg('<path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/>'),
+    file: svg('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>'),
+    edit: svg('<path d="M12.5 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v9.5"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M13.378 15.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/>'),
+    terminal: svg('<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>'),
+    chevron: svg('<path d="m6 9 6 6 6-6"/>'),
+    wave: svg('<path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/>'),
+    send: svg('<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>'),
+    stop: svg('<rect x="6" y="6" width="12" height="12" rx="2"/>')
+  };
+
+  /* ---------- summary logic ---------- */
+  const CATS = {
+    cmd:     { one: 'ran a command',   many: 'ran commands' },
+    browser: { one: 'used the browser', many: 'used the browser' },
+    read:    { one: 'read a file',     many: 'read files' },
+    edit:    { one: 'edited a file',   many: 'edited files' }
+  };
+  const RUNNING = {
+    think: 'Thinking…', cmd: 'Running a command…', browser: 'Using the browser…',
+    read: 'Reading files…', edit: 'Editing files…'
+  };
+
+  function summarize(actions) {
+    const order = [], counts = {};
+    for (const a of actions) {
+      if (a === 'think') continue;
+      if (!(a in counts)) { counts[a] = 0; order.push(a); }
+      counts[a]++;
+    }
+    const parts = order.map(a => counts[a] === 1 ? CATS[a].one : CATS[a].many);
+    const s = parts.join(', ');
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  function iconFor(actions) {
+    if (actions.includes('think')) return { svg: ICONS.sparkle, cls: 'c-blue' };
+    const first = actions.find(a => a !== 'think');
+    switch (first) {
+      case 'browser': return { svg: ICONS.plug, cls: 'c-blue' };
+      case 'read':    return { svg: ICONS.file, cls: 'c-green' };
+      case 'edit':    return { svg: ICONS.edit, cls: 'c-green' };
+      default:        return { svg: ICONS.terminal, cls: 'c-orange' };
+    }
+  }
+
+  /* ---------- demo script (copy of the screenshot) ---------- */
+  const SCRIPT = [
+    { type: 'group', actions: ['think', 'cmd'] },
+    { type: 'text', parts: ['Two routes: ', { code: '/chat' }, ' (AI chat) and ', { code: '/cli' }, ' (coding in your terminal). Let me inspect both.'] },
+    { type: 'group', actions: ['browser', 'cmd', 'cmd', 'read'] },
+    { type: 'group', actions: ['read', 'read', 'cmd', 'cmd', 'browser'] },
+    { type: 'group', actions: ['think', 'browser', 'cmd', 'cmd', 'read'] },
+    { type: 'group', actions: ['browser', 'cmd'] },
+    { type: 'text', parts: ['Now I\u2019ll build both pages: multi-page Vite config, then the chat and CLI routes.'] },
+    { type: 'group', actions: ['edit', 'edit', 'cmd'] },
+    { type: 'group', actions: ['think', 'edit', 'cmd', 'cmd', 'browser'] },
+    { type: 'group', actions: ['read', 'read', 'edit', 'edit', 'cmd', 'cmd'] },
+    { type: 'group', actions: ['think', 'cmd', 'browser', 'read', 'read'] },
+    { type: 'group', actions: ['edit', 'edit', 'browser', 'read', 'read'] },
+    { type: 'group', actions: ['cmd', 'cmd', 'read', 'read', 'browser'] }
+  ];
+  const FINAL = ['Both routes are built: ', { code: '/chat' }, ' for the AI chat and ', { code: '/cli' }, ' for the terminal. The build passes and the dev server is running.'];
+
+  const DETAIL = {
+    think:   [['Thought', 'for 4s'], ['Thought', 'for 7s']],
+    cmd:     [['Ran', 'ls src'], ['Ran', 'npm run build'], ['Ran', 'git status --short'], ['Ran', 'npx vite build'], ['Ran', 'grep -rn "route" src'], ['Ran', 'node scripts/check.mjs']],
+    browser: [['Opened', 'localhost:5173/chat'], ['Opened', 'localhost:5173/cli'], ['Clicked', 'Send'], ['Screenshot', 'viewport 390x844']],
+    read:    [['Read', 'vite.config.ts'], ['Read', 'src/routes/chat.tsx'], ['Read', 'src/routes/cli.tsx'], ['Read', 'package.json'], ['Read', 'index.html']],
+    edit:    [['Edited', 'vite.config.ts'], ['Edited', 'src/routes/chat.tsx'], ['Edited', 'src/routes/cli.tsx'], ['Edited', 'src/main.tsx'], ['Edited', 'cli.html']]
+  };
+  const dcount = {};
+  const nextDetail = (a) => {
+    const pool = DETAIL[a];
+    dcount[a] = (dcount[a] || 0);
+    return pool[dcount[a]++ % pool.length];
+  };
+
+  /* ---------- helpers ---------- */
+  const $ = (s) => document.querySelector(s);
+  const chat = $('#chat'), input = $('#input'), go = $('#go'), suggest = $('#suggest');
+  const scrollBtn = $('#scrollBtn'), empty = $('#empty');
+  const SUGGESTION = input.getAttribute('placeholder');
+
+  const el = (tag, cls, html) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (html != null) n.innerHTML = html;
+    return n;
+  };
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const fmt = (s) => { const m = Math.floor(s / 60), r = s % 60; return m ? `${m}m ${r}s` : `${r}s`; };
+
+  let running = false, cancelled = false, follow = true;
+
+  function distFromBottom() { return chat.scrollHeight - chat.scrollTop - chat.clientHeight; }
+  function stick() { if (follow) chat.scrollTop = chat.scrollHeight; }
+  chat.addEventListener('scroll', () => {
+    const d = distFromBottom();
+    follow = d < 80;
+    scrollBtn.classList.toggle('show', d > 120);
+  }, { passive: true });
+  scrollBtn.addEventListener('click', () => {
+    follow = true;
+    chat.scrollTo({ top: chat.scrollHeight, behavior: 'smooth' });
+  });
+
+  /* ---------- rendering ---------- */
+  async function streamText(parent, parts, cls) {
+    const p = el('div', 'txt' + (cls ? ' ' + cls : ''));
+    p.setAttribute('dir', 'auto');
+    parent.append(p);
+    for (const part of parts) {
+      if (cancelled) return;
+      if (typeof part === 'string') {
+        for (const w of part.split(/(\s+)/)) {
+          if (cancelled) return;
+          if (!w) continue;
+          p.append(document.createTextNode(w));
+          if (w.trim()) { stick(); await sleep(rand(18, 42)); }
+        }
+      } else {
+        const c = el('code'); c.textContent = part.code; p.append(c);
+        stick(); await sleep(40);
+      }
+    }
+    stick();
+  }
+
+  async function runGroup(parent, actions) {
+    const g = el('div', 'grp running');
+    const row = el('div', 'grp-row');
+    row.setAttribute('role', 'button'); row.tabIndex = 0; row.setAttribute('aria-expanded', 'false');
+    const ico = el('span', 'ico'); ico.append(el('span', 'spinner'));
+    const lbl = el('span', 'lbl', RUNNING[actions[0]]);
+    row.append(ico, lbl);
+    const detail = el('div', 'detail'), dIn = el('div', 'inner');
+    detail.append(dIn); g.append(row, detail); parent.append(g); stick();
+
+    const toggle = () => {
+      const open = g.classList.toggle('open');
+      row.setAttribute('aria-expanded', String(open));
+    };
+    row.addEventListener('click', toggle);
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+
+    for (const a of actions) {
+      if (cancelled) break;
+      lbl.textContent = RUNNING[a];
+      const [k, v] = nextDetail(a);
+      const line = el('div', 'dline');
+      line.append(el('span', 'k', k), Object.assign(el('span', 'v'), { textContent: v }));
+      dIn.append(line);
+      stick();
+      await sleep(rand(320, 640));
+    }
+
+    g.classList.remove('running');
+    const ic = iconFor(actions);
+    ico.className = 'ico ' + ic.cls;
+    ico.innerHTML = ic.svg;
+    lbl.textContent = summarize(actions);
+    stick();
+    await sleep(rand(120, 260));
+  }
+
+  /* ---------- run ---------- */
+  async function run(text) {
+    running = true; cancelled = false; follow = true; updateButton();
+    empty.remove();
+
+    const u = el('div', 'user'); u.textContent = text; chat.append(u);
+
+    const turn = el('div', 'turn');
+    const head = el('button', 'runhead');
+    head.type = 'button';
+    const label = el('span', null, 'Working for 0s');
+    head.append(label); head.insertAdjacentHTML('beforeend', ICONS.chevron);
+    const body = el('div', 'runbody'), inner = el('div', 'inner');
+    body.append(inner); turn.append(head, body); chat.append(turn);
+    head.addEventListener('click', () => turn.classList.toggle('collapsed'));
+    stick();
+
+    const t0 = Date.now();
+    const tick = setInterval(() => {
+      label.textContent = 'Working for ' + fmt(Math.floor((Date.now() - t0) / 1000));
+    }, 500);
+
+    for (const item of SCRIPT) {
+      if (cancelled) break;
+      if (item.type === 'text') await streamText(inner, item.parts);
+      else await runGroup(inner, item.actions);
+    }
+
+    clearInterval(tick);
+    const secs = Math.max(1, Math.round((Date.now() - t0) / 1000));
+    label.textContent = (cancelled ? 'Stopped after ' : 'Worked for ') + fmt(secs);
+
+    if (!cancelled) await streamText(turn, FINAL, 'final');
+
+    running = false; updateButton();
+  }
+
+  /* ---------- composer ---------- */
+  function updateButton() {
+    const has = input.value.trim().length > 0;
+    go.classList.toggle('stop', running);
+    if (running) { go.innerHTML = ICONS.stop; go.setAttribute('aria-label', 'Stop'); }
+    else if (has) { go.innerHTML = ICONS.send; go.setAttribute('aria-label', 'Send'); }
+    else { go.innerHTML = ICONS.wave; go.setAttribute('aria-label', 'Voice'); }
+    suggest.hidden = has || running;
+  }
+  function autosize() {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 170) + 'px';
+  }
+  function send() {
+    const v = input.value.trim();
+    if (!v || running) return;
+    input.value = ''; autosize(); updateButton();
+    run(v);
+  }
+
+  input.addEventListener('input', () => { autosize(); updateButton(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
+  });
+  suggest.addEventListener('click', () => { input.value = SUGGESTION; autosize(); updateButton(); input.focus(); });
+  go.addEventListener('click', () => {
+    if (running) { cancelled = true; return; }
+    if (input.value.trim()) send();
+  });
+
+  /* ---------- specs sheet ---------- */
+  const spec = $('#spec');
+  $('#specBtn').addEventListener('click', () => spec.classList.add('on'));
+  $('#specClose').addEventListener('click', () => spec.classList.remove('on'));
+  spec.addEventListener('click', (e) => { if (e.target === spec) spec.classList.remove('on'); });
+
+  updateButton();
+})();
+</script>
+</body>
+</html>
