@@ -35,6 +35,7 @@ import {
 } from './lib/mock';
 import type { Lang } from './lib/i18n';
 import { hasLiveProvider, runLiveTurn, type AskRequest } from './lib/agentClient.local';
+import { isMockMode } from './lib/modelCatalog';
 import type { PermissionMode } from './engine/agent/permissions';
 import { ERROR_HINT, ProviderError } from './engine/providers/errors';
 
@@ -344,9 +345,9 @@ export const useStore = create<AppStore>((set, get) => ({
     const mode = session.mode;
     void (async () => {
       try {
-        if (await hasLiveProvider()) {
+        if (!isMockMode() && (await hasLiveProvider(session.model))) {
           if (token !== runToken) return;
-          await runLive(sid, turnId, text, mode, token, set, get);
+          await runLive(sid, turnId, text, mode, session.model, token, set, get);
           return;
         }
       } catch {
@@ -820,6 +821,7 @@ async function runLive(
   turnId: string,
   text: string,
   mode: Mode,
+  model: string,
   token: number,
   set: (fn: (s: AppStore) => Partial<AppStore>) => void,
   get: () => AppStore,
@@ -859,6 +861,7 @@ async function runLive(
       sessionId: sid,
       text,
       mode,
+      model,
       lang: get().lang,
       permissionMode,
       signal: controller.signal,

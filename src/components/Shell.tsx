@@ -598,14 +598,14 @@ export function CommandPalette() {
 
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[95] flex items-start justify-center pt-[12vh] px-4">
+    <div className="z-dialog fixed inset-0 flex items-start justify-center pt-[12vh] px-4">
       <div className="absolute inset-0" style={{ background: 'var(--scrim)', backdropFilter: 'blur(2px)' }} onClick={() => setPalette(false)} aria-hidden />
       <div
         role="dialog"
         aria-modal="true"
         aria-label={t('palette.placeholder')}
-        className="relative w-full animate-popIn overflow-hidden"
-        style={{ maxWidth: 560, background: 'var(--panel)', border: '1px solid var(--line-strong)', borderRadius: 18, boxShadow: '0 24px 70px rgba(0,0,0,.5)' }}
+        className="popover-surface relative w-full animate-popIn overflow-hidden"
+        style={{ maxWidth: 560, borderRadius: 18 }}
       >
         <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--line)]">
           <CommandIcon size={18} className="text-[var(--faint)]" />

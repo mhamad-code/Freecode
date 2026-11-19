@@ -18,13 +18,17 @@ import {
 } from 'lucide-react';
 import { useStore } from '../store';
 import { useI18n } from '../lib/i18n';
+import { buildCatalog, flattenCatalog, isMockMode, pickDefaultModel } from '../lib/modelCatalog';
+import { useCatalog } from '../lib/useCatalog';
 import type { Effort, Mode } from '../lib/types';
-import { Badge, Btn, IBtn, Kbd, Menu, MenuItem, Segmented, Tip, useMedia } from './ui';
+import { Badge, Btn, IBtn, Kbd, Menu, MenuItem, SearchInput, Segmented, Tip, useMedia } from './ui';
+import { Popover } from './Popover';
 
-const MODELS = [
-  { id: 'DeepSeek V4.1 Flash', desc: 'Fast, cheap, great for edits', speed: 3, cost: 1 },
-  { id: 'Claude Sonnet 4.5', desc: 'Best balance for long tasks', speed: 2, cost: 3 },
-  { id: 'GPT-5 Codex', desc: 'Strongest reasoning, slower', speed: 1, cost: 4 },
+/** Demo models: only reachable with ?mock=1, never mixed into a real catalog. */
+const DEMO_MODELS = [
+  { id: 'DeepSeek V4.1 Flash', desc: 'Fast, cheap, great for edits' },
+  { id: 'Claude Sonnet 4.5', desc: 'Best balance for long tasks' },
+  { id: 'GPT-5 Codex', desc: 'Strongest reasoning, slower' },
 ];
 
 function ContextRing({ pct, onOpen }: { pct: number; onOpen: () => void }) {
@@ -70,9 +74,30 @@ export function Composer() {
   const [drag, setDrag] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const [error, setError] = useState(false);
+  const [modelQuery, setModelQuery] = useState('');
+  const [showAll, setShowAll] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const providers = useCatalog();
+  const mock = isMockMode();
+  const groups = mock ? [] : buildCatalog(providers, showAll);
+  const catalog = flattenCatalog(groups);
+  const defaultModel = pickDefaultModel(catalog);
+  const hiddenCount = groups.reduce((n, g) => n + g.hidden, 0);
+  const query = modelQuery.trim().toLowerCase();
+  const visibleGroups = groups
+    .map((g) => ({ ...g, models: g.models.filter((m) => `${m.label} ${m.id} ${g.label}`.toLowerCase().includes(query)) }))
+    .filter((g) => g.models.length > 0);
+  const demoModels = DEMO_MODELS.filter((m) => `${m.id} ${m.desc}`.toLowerCase().includes(query));
+  const activeModel = catalog.find((m) => m.id === session.model);
+  const triggerLabel = mock ? session.model : activeModel?.label ?? defaultModel?.label ?? session.model;
   const isWide = useMedia('(min-width: 640px)');
   const running = session.status === 'running';
+
+  useEffect(() => {
+    if (mock || !catalog.length) return;
+    if (!catalog.some((m) => m.id === session.model) && defaultModel) setModel(defaultModel.id);
+  }, [mock, catalog, defaultModel, session.model, setModel]);
 
   useEffect(() => {
     setText(session.draft);
@@ -184,7 +209,7 @@ export function Composer() {
             </div>
           ) : null}
 
-          <div className="relative">
+          <div className="relative" ref={boxRef}>
             <textarea
               ref={ref}
               value={text}
@@ -224,12 +249,19 @@ export function Composer() {
               </button>
             ) : null}
 
-            {menu ? (
-              <div
-                className="absolute bottom-full mb-2 w-full max-w-[420px] p-1.5 z-30 animate-popIn"
-                style={{ background: 'var(--panel)', border: '1px solid var(--line-strong)', borderRadius: 14, boxShadow: '0 16px 44px rgba(0,0,0,.45)' }}
-                role="listbox"
-              >
+            <Popover
+              open={menu !== null}
+              onOpenChange={(o) => { if (!o) setMenu(null); }}
+              anchorRef={boxRef}
+              side="top"
+              align="start"
+              width={420}
+              maxWidth={420}
+              mobileSheet
+              closeOnSelect
+              panelClassName="p-1.5"
+              label={menu === 'slash' ? 'Skills' : 'Files'}
+            >
                 {(menu === 'slash' ? skills.map((s) => ({ key: s.id, name: s.name, desc: s.description, badge: 'Skill' })) : files.slice(0, 6).map((f) => ({ key: f.path, name: f.name, desc: f.path, badge: 'File' }))).map((row) => (
                   <button
                     key={row.key}
@@ -248,8 +280,7 @@ export function Composer() {
                     <Badge>{row.badge}</Badge>
                   </button>
                 ))}
-              </div>
-            ) : null}
+            </Popover>
           </div>
 
           {error ? (
@@ -290,41 +321,90 @@ export function Composer() {
               <MenuItem icon={<Wand2 size={16} />}>Take a snapshot</MenuItem>
             </Menu>
 
-            <Menu
+            <Popover
+              side="top"
               align="start"
-              width={286}
+              width={360}
+              maxWidth={360}
               className="flex-1 min-w-0"
+              mobileSheet
+              label={t('composer.model')}
               trigger={
                 <button type="button" className="flex items-center gap-1 px-1.5 h-8 w-full rounded-lg hover:bg-[var(--hover)] text-[13px] whitespace-nowrap min-w-0">
-                  <span className="truncate flex-1 min-w-0">{session.model}</span>
+                  <span className="truncate flex-1 min-w-0">{triggerLabel}</span>
                   <span className="text-[var(--muted)] capitalize">{session.effort}</span>
                   <ChevronDown size={14} className="text-[var(--muted)]" />
                 </button>
               }
+              header={
+                <div className="p-2 border-b border-[var(--line)]">
+                  <SearchInput value={modelQuery} onValueChange={setModelQuery} placeholder={t('composer.model')} />
+                </div>
+              }
             >
-              <div className="px-2 pt-1 pb-2 text-[11.5px] uppercase tracking-wide text-[var(--faint)]">{t('composer.model')}</div>
-              {MODELS.map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => setModel(m.id)}
-                  className="w-full px-2 py-2 rounded-[9px] text-start hover:bg-[var(--hover)]"
-                >
-                  <div className="flex items-center gap-2 text-[14.5px]">
-                    <span className="flex-1 truncate">{m.id}</span>
-                    {session.model === m.id ? <Check size={15} className="text-[var(--accent)]" /> : null}
-                  </div>
-                  <div className="text-[12.5px] text-[var(--muted)]">{m.desc}</div>
-                  <div className="flex items-center gap-1 mt-1">
-                    {Array.from({ length: 4 }).map((_, i) => (
-                      <span key={i} className="w-3 h-1 rounded-full" style={{ background: i < m.speed ? 'var(--accent)' : 'var(--line-strong)' }} />
+              <div className="p-1">
+                {mock
+                  ? demoModels.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setModel(m.id)}
+                        className="w-full px-2 py-2 rounded-[9px] text-start hover:bg-[var(--hover)]"
+                      >
+                        <div className="flex items-center gap-2 text-[14.5px]">
+                          <span className="flex-1 truncate">{m.id}</span>
+                          <Badge>{t('model.demo')}</Badge>
+                          {session.model === m.id ? <Check size={15} className="text-[var(--accent)]" /> : null}
+                        </div>
+                        <div className="text-[12.5px] text-[var(--muted)]">{m.desc}</div>
+                      </button>
+                    ))
+                  : visibleGroups.map((group) => (
+                      <div key={group.providerId}>
+                        <div className="px-2 pt-2 pb-1 text-[11.5px] uppercase tracking-wide text-[var(--faint)] flex items-center gap-1.5">
+                          <span className="truncate">{group.label}</span>
+                          {group.keyless ? <Badge tone="accent">{t('model.free')}</Badge> : null}
+                          <span className="ms-auto">{group.models.length}</span>
+                        </div>
+                        {group.models.map((m) => (
+                          <button
+                            key={`${group.providerId}:${m.id}`}
+                            type="button"
+                            onClick={() => setModel(m.id)}
+                            className="w-full px-2 py-1.5 rounded-[9px] text-start hover:bg-[var(--hover)]"
+                          >
+                            <div className="flex items-center gap-1.5 text-[14px]">
+                              <span className="flex-1 truncate" dir="ltr">{m.label}</span>
+                              {m.free ? <Badge tone="accent">{t('model.free')}</Badge> : null}
+                              {m.tools ? <Badge>{t('model.tools')}</Badge> : null}
+                              {m.reasoning ? <Badge tone="info">{t('model.reasoning')}</Badge> : null}
+                              {session.model === m.id ? <Check size={15} className="text-[var(--accent)]" /> : null}
+                            </div>
+                            <div className="text-[12px] text-[var(--muted)] truncate" dir="ltr">
+                              {m.id}
+                              {m.contextWindow ? ` · ${Math.round(m.contextWindow / 1000)}k` : ''}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
                     ))}
-                    <span className="text-[11.5px] text-[var(--faint)] ms-1">speed</span>
+                {!mock && visibleGroups.length === 0 ? (
+                  <div className="px-2 py-6 text-center text-[13.5px] text-[var(--muted)]">
+                    {query ? t('palette.noResults', { q: modelQuery }) : t('model.empty')}
                   </div>
-                </button>
-              ))}
+                ) : null}
+                {hiddenCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowAll((v) => !v)}
+                    className="w-full mt-1 px-2 h-9 rounded-[9px] text-[13px] text-start hover:bg-[var(--hover)] text-[var(--muted)]"
+                  >
+                    {showAll ? t('model.showLess') : t('model.showAll', { n: String(hiddenCount) })}
+                  </button>
+                ) : null}
+              </div>
               <div className="px-2 pt-2 pb-1 text-[11.5px] uppercase tracking-wide text-[var(--faint)]">Reasoning effort</div>
-              <div className="px-1 pb-1">
+              <div className="px-1.5 pb-1.5">
                 <Segmented<Effort>
                   value={session.effort}
                   onChange={setEffort}
@@ -335,14 +415,14 @@ export function Composer() {
                   ]}
                 />
               </div>
-            </Menu>
+            </Popover>
 
             <ContextRing pct={usage.context} onOpen={() => setContextOpen((v) => !v)} />
 
             {contextOpen ? (
               <div
-                className="absolute bottom-[52px] end-0 z-30 w-[268px] p-3 animate-popIn"
-                style={{ background: 'var(--panel)', border: '1px solid var(--line-strong)', borderRadius: 14, boxShadow: '0 16px 44px rgba(0,0,0,.45)' }}
+                className="popover-surface z-popover absolute bottom-[52px] end-0 w-[268px] p-3 animate-popIn"
+                style={{ borderRadius: 14 }}
               >
                 <div className="text-[14px] font-semibold">
                   Context {usage.context}% used · {usage.tokens}k / 200k tokens

@@ -57,6 +57,43 @@ state.
 
 See `docs/ARCHITECTURE.md` and `SETUP.md`.
 
+## Deploy on Netlify
+
+The build is static; Netlify serves `dist/` and the two files in `public/` are copied into it:
+`_headers` (cross-origin isolation) and `_redirects` (`/*  /index.html  200`, SPA routes).
+`netlify.toml` sets the build command, publish directory and Node 20.
+
+From a phone:
+
+1. Open <https://app.netlify.com/start> and choose **Import from Git**.
+2. Authorize GitHub if asked, then pick the `Freecode` repository.
+3. Keep the detected settings, or set **Build command** to `npm run build` and
+   **Publish directory** to `dist`. Node version comes from `netlify.toml`.
+4. Tap **Deploy site**. Every later push to `main` rebuilds automatically.
+
+The GitHub workflow now only runs typecheck, tests and the build; it does not deploy. The
+current deployment is <https://freecode-mhamad.netlify.app>.
+
+### Check cross-origin isolation after deploy
+
+Open the site, then in the browser console:
+
+```js
+crossOriginIsolated        // must be true
+typeof SharedArrayBuffer   // "function"
+```
+
+Or check the response headers:
+
+```bash
+curl -I https://<site>.netlify.app/
+# Cross-Origin-Opener-Policy: same-origin
+# Cross-Origin-Embedder-Policy: credentialless
+```
+
+Settings → General → Data → **Runtime status** shows the same values inside the app and
+reports the reason when the runtime is limited.
+
 ## Swapping the mock agent for a backend
 
 Components never talk to a transport directly. A run is produced by `send()` in `src/store.ts`,

@@ -9,6 +9,7 @@ import { decode, type ProjectFS } from '../storage/projectFs';
 import { MemoryFS } from '../storage/projectFs/memory';
 import { FILE_CONTENTS } from './mock';
 import { registryFor, loadProviders, secretFor } from './providersStore';
+import { buildCatalog, findModel, flattenCatalog, pickDefaultModel } from './modelCatalog';
 import type { Lang } from './i18n';
 
 export interface AskRequest {
@@ -23,6 +24,8 @@ export interface LiveTurnOptions {
   mode: 'build' | 'plan' | 'mission' | 'skills';
   lang: Lang;
   permissionMode: PermissionMode;
+  /** Selected composer model. Falls back to the catalog default when absent. */
+  model?: string;
   onEvent: (event: AgentEvent) => void;
   ask: (req: AskRequest) => Promise<'allow' | 'deny'>;
   signal?: AbortSignal;
@@ -47,19 +50,22 @@ export interface LiveProviderChoice {
   modelId: string;
 }
 
-/** Returns the first enabled provider that has a discovered tools-capable model. */
-export function liveProviderChoice(): LiveProviderChoice | null {
-  for (const provider of loadProviders()) {
-    if (!provider.enabled || provider.corsStatus === 'blocked') continue;
-    const model =
-      provider.models.find((m) => m.tools !== false && !m.retired) ?? provider.models[0];
-    if (model) return { providerId: provider.id, modelId: model.id };
+/** Resolves the provider that serves `preferred`, or the catalog default. */
+export function liveProviderChoice(preferred?: string): LiveProviderChoice | null {
+  const providers = loadProviders();
+  if (preferred) {
+    const hit = findModel(providers, preferred);
+    if (hit && hit.provider.corsStatus !== 'blocked') {
+      return { providerId: hit.provider.id, modelId: hit.model.id };
+    }
   }
-  return null;
+  const models = flattenCatalog(buildCatalog(providers, false));
+  const fallback = pickDefaultModel(models);
+  return fallback ? { providerId: fallback.providerId, modelId: fallback.id } : null;
 }
 
-export async function hasLiveProvider(): Promise<boolean> {
-  const choice = liveProviderChoice();
+export async function hasLiveProvider(preferred?: string): Promise<boolean> {
+  const choice = liveProviderChoice(preferred);
   if (!choice) return false;
   const provider = loadProviders().find((p) => p.id === choice.providerId);
   if (!provider) return false;
@@ -69,7 +75,7 @@ export async function hasLiveProvider(): Promise<boolean> {
 }
 
 export async function runLiveTurn(opts: LiveTurnOptions): Promise<{ text: string }> {
-  const choice = liveProviderChoice();
+  const choice = liveProviderChoice(opts.model);
   if (!choice) throw new Error('No configured provider with an available model.');
   const registry = registryFor(loadProviders());
   const fs = await sessionFs(opts.sessionId);

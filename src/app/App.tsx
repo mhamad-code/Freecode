@@ -11,9 +11,6 @@ import Integrations from '../pages/Integrations';
 import Connect from '../pages/Connect';
 import Sites from '../pages/Sites';
 
-// Empty on a root deployment; "/Freecode" on a GitHub Pages project site.
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
-
 function useApplyTheme() {
   const themeId = useStore((s) => s.themeId);
   const reduce = useStore((s) => s.settings.reduceMotion);
@@ -64,7 +61,7 @@ function useShortcuts() {
       } else if (mod && e.key === ',') {
         e.preventDefault();
         window.location.hash = '';
-        window.history.pushState({}, '', `${BASE}/settings/general`);
+        window.history.pushState({}, '', '/settings/general');
         window.dispatchEvent(new PopStateEvent('popstate'));
       } else if (mod && e.key === '`') {
         e.preventDefault();
@@ -80,7 +77,7 @@ function useShortcuts() {
         const modes = ['build', 'plan', 'mission', 'skills'] as const;
         store().setSessionMode(modes[Number(e.key) - 1]);
       } else if (e.key === '?' && !typing) {
-        window.location.assign(`${BASE}/settings/keyboard`);
+        window.location.assign('/settings/keyboard');
       }
     };
     document.addEventListener('keydown', onKey);
@@ -164,14 +161,14 @@ export default function App() {
   useShortcuts();
   const lang = useI18n().lang;
   return (
-    <BrowserRouter basename={BASE || '/'}>
+    <BrowserRouter>
       <Routes>
         <Route
           path="/connect/:service"
           element={
             <Connect
               onDone={() => {
-                window.location.assign(`${BASE}/integrations`);
+                window.location.assign('/integrations');
               }}
             />
           }

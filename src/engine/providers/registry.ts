@@ -136,6 +136,9 @@ export class ProviderRegistry {
     const url = joinUrl(provider.baseUrl, provider.catalog.path);
     const { secret } = await this.resolveSecret(provider);
     const headers = await this.headers(provider, secret);
+    // A GET with Content-Type triggers a CORS preflight that several free
+    // catalogs reject, which looks like "Failed to fetch" in the browser.
+    delete headers['Content-Type'];
     const res = await this.fetchImpl(url, { method: 'GET', headers });
     if (!res.ok) {
       const body = await res.text().catch(() => '');

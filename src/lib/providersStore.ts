@@ -33,6 +33,11 @@ export function saveProviders(list: ProviderConfig[]): void {
   } catch {
     // storage may be unavailable; the UI surfaces the failure separately
   }
+  try {
+    window.dispatchEvent(new Event('fc:providers'));
+  } catch {
+    // no window (tests); the event is only a UI refresh hint
+  }
 }
 
 const secretId = (providerId: string, keyId: string) => `provider:${providerId}:key:${keyId}`;

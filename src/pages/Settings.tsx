@@ -50,6 +50,7 @@ import {
   Tip,
   useCountUp,
 } from '../components/ui';
+import { RuntimeStatus } from '../components/RuntimeBanner';
 import ProvidersTab from './ProvidersTab';
 import { exportBackup, readBackup } from '../lib/backup';
 
@@ -216,6 +217,7 @@ function GeneralTab() {
       <div className="mb-8">
         <SectionTitle icon={<Trash2 size={18} />} title={t('settings.data')} />
         <SettingCard>
+          <RuntimeStatus />
           <Row label={t('settings.exportBackup')} hint={t('settings.exportHint')}>
             <Btn size="sm" variant="primary" onClick={doExport}>{t('settings.exportBackup')}</Btn>
           </Row>

@@ -322,6 +322,57 @@ export const THEMES: ThemePreset[] = [
   },
 ];
 
+type RGBA = { r: number; g: number; b: number; a: number };
+
+const parseColor = (input: string): RGBA | null => {
+  const value = input.trim();
+  const hex = /^#([0-9a-f]{3,8})$/i.exec(value);
+  if (hex) {
+    const h = hex[1];
+    if (h.length === 3 || h.length === 4) {
+      const [r, g, b, a = 'f'] = h.split('');
+      return { r: parseInt(r + r, 16), g: parseInt(g + g, 16), b: parseInt(b + b, 16), a: parseInt(a + a, 16) / 255 };
+    }
+    if (h.length === 6 || h.length === 8) {
+      return {
+        r: parseInt(h.slice(0, 2), 16),
+        g: parseInt(h.slice(2, 4), 16),
+        b: parseInt(h.slice(4, 6), 16),
+        a: h.length === 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1,
+      };
+    }
+    return null;
+  }
+  const rgb = /^rgba?\(([^)]+)\)$/i.exec(value);
+  if (rgb) {
+    const parts = rgb[1].replace(/\//g, ' ').replace(/,/g, ' ').split(/\s+/).filter(Boolean).map(Number);
+    if (parts.length >= 3 && parts.slice(0, 3).every((n) => Number.isFinite(n))) {
+      return { r: parts[0], g: parts[1], b: parts[2], a: Number.isFinite(parts[3]) ? parts[3] : 1 };
+    }
+  }
+  return null;
+};
+
+const toHex = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+
+/**
+ * Flattens a (possibly translucent) colour over an opaque backdrop and returns hex.
+ * Floating surfaces must be fully opaque so chat text can never bleed through.
+ */
+export const opaqueColor = (color: string, backdrop: string): string => {
+  const fg = parseColor(color);
+  const bg = parseColor(backdrop);
+  if (!fg) return color;
+  if (fg.a >= 1) return `#${toHex(fg.r)}${toHex(fg.g)}${toHex(fg.b)}`;
+  if (!bg) return color;
+  const base = bg.a >= 1 ? bg : { ...bg, a: 1 };
+  const mix = (f: number, b: number) => f * fg.a + b * (1 - fg.a);
+  return `#${toHex(mix(fg.r, base.r))}${toHex(mix(fg.g, base.g))}${toHex(mix(fg.b, base.b))}`;
+};
+
+/** Alpha of a colour string, or null when it cannot be parsed. */
+export const colorAlpha = (color: string): number | null => parseColor(color)?.a ?? null;
+
 export const THEME_BY_ID = (id: string) => THEMES.find((t) => t.id === id) ?? THEMES[0];
 export const isThemeAvailable = (_id: string) => true;
 
@@ -351,6 +402,8 @@ export const cssVars = (t: ThemePreset): Record<string, string> => {
     const val = t.tokens[key];
     if (val) v[css] = val;
   }
+  v['--popover'] = opaqueColor(t.tokens.panel, t.tokens.bg);
+  v['--popover-ink'] = t.tokens.text;
   v['--bg-image'] = t.bgImage ? t.bgImage : 'none';
   return v;
 };

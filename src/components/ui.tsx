@@ -16,6 +16,7 @@ import markLight from '../assets/brand/logo-mark-light.png';
 import markDark from '../assets/brand/logo-mark-dark.png';
 import { useStore } from '../store';
 import { useI18n } from '../lib/i18n';
+import { Popover } from './Popover';
 
 /* ------------------------------- buttons ------------------------------- */
 type BtnVariant = 'default' | 'primary' | 'inverse' | 'outline' | 'danger' | 'ghost';
@@ -231,7 +232,8 @@ export function Dialog({
   if (!open) return null;
   return createPortal(
     <div
-      className={clsx('fixed inset-0 z-[90] flex justify-center p-4', sheet ? 'items-end sm:items-center' : 'items-center')}
+      className={clsx('fixed inset-0 flex justify-center p-4', sheet ? 'items-end sm:items-center' : 'items-center')}
+      style={{ zIndex: 'var(--z-dialog)' }}
     >
       <div
         className="absolute inset-0"
@@ -243,14 +245,11 @@ export function Dialog({
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === 'string' ? title : undefined}
-        className="relative w-full animate-popIn flex flex-col overflow-hidden"
+        className="popover-surface relative w-full animate-popIn flex flex-col overflow-hidden"
         style={{
           maxWidth: width,
           maxHeight: 'calc(100dvh - 32px)',
-          background: 'var(--panel)',
-          border: '1px solid var(--line-strong)',
           borderRadius: sheet ? '18px 18px 12px 12px' : 18,
-          boxShadow: '0 24px 70px rgba(0,0,0,.45)',
         }}
       >
         {sheet ? <div className="mx-auto mt-2 h-1 w-9 rounded-full bg-[var(--line-strong)]" /> : null}
@@ -276,50 +275,33 @@ export function Menu({
   align = 'end',
   width = 230,
   className,
+  side = 'auto',
+  header,
+  panelClassName,
 }: {
   trigger: ReactNode;
   children: ReactNode;
   align?: 'start' | 'end';
   width?: number;
   className?: string;
+  side?: 'top' | 'bottom' | 'auto';
+  header?: ReactNode;
+  panelClassName?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
   return (
-    <div className={clsx('relative', className)} ref={ref}>
-      <div onClick={() => setOpen((o) => !o)}>{trigger}</div>
-      {open ? (
-        <div
-          role="menu"
-          className="absolute z-[70] mt-1 animate-popIn p-1"
-          style={{
-            insetInlineEnd: align === 'end' ? 0 : undefined,
-            insetInlineStart: align === 'start' ? 0 : undefined,
-            minWidth: width,
-            background: 'var(--panel)',
-            border: '1px solid var(--line-strong)',
-            borderRadius: 14,
-            boxShadow: '0 12px 32px rgba(0,0,0,.5)',
-          }}
-          onClick={() => setOpen(false)}
-        >
-          {children}
-        </div>
-      ) : null}
-    </div>
+    <Popover
+      trigger={trigger}
+      align={align}
+      side={side}
+      width={width}
+      maxWidth={Math.min(360, Math.max(width, 240))}
+      header={header}
+      className={className}
+      panelClassName={clsx('p-1', panelClassName)}
+      closeOnSelect
+    >
+      {children}
+    </Popover>
   );
 }
 
@@ -362,18 +344,12 @@ export function Tip({ label, children, side = 'right' }: { label: string; childr
       <span
         role="tooltip"
         className={clsx(
-          'pointer-events-none absolute z-[75] hidden whitespace-nowrap rounded-lg px-2 py-1 text-[12.5px] group-hover/tip:block group-focus-within/tip:block',
+          'popover-surface z-popover pointer-events-none absolute hidden whitespace-nowrap rounded-lg px-2 py-1 text-[12.5px] group-hover/tip:block group-focus-within/tip:block',
           side === 'right' && 'left-full top-1/2 -translate-y-1/2 ms-2',
           side === 'top' && 'bottom-full left-1/2 -translate-x-1/2 mb-2',
           side === 'bottom' && 'top-full left-1/2 -translate-x-1/2 mt-2',
         )}
-        style={{
-          background: 'var(--panel-2)',
-          color: 'var(--text)',
-          border: '1px solid var(--line-strong)',
-          boxShadow: '0 8px 24px rgba(0,0,0,.4)',
-          transitionDelay: '400ms',
-        }}
+        style={{ transitionDelay: '400ms' }}
       >
         {label}
       </span>
@@ -472,21 +448,15 @@ export function ToastHost() {
   const { dir } = useI18n();
   return createPortal(
     <div
-      className="fixed z-[120] flex flex-col items-center gap-2 pointer-events-none"
+      className="z-toast fixed flex flex-col items-center gap-2 pointer-events-none"
       style={{ bottom: 'calc(24px + env(safe-area-inset-bottom))', left: '50%', transform: 'translateX(-50%)', direction: dir }}
     >
       {toasts.map((t) => (
         <div
           key={t.id}
           role="status"
-          className="pointer-events-auto animate-fadeUp flex items-center gap-3 px-3.5 py-2.5 text-[14.5px]"
-          style={{
-            background: 'var(--panel-2)',
-            border: '1px solid var(--line-strong)',
-            borderRadius: 14,
-            boxShadow: '0 10px 30px rgba(0,0,0,.4)',
-            maxWidth: 'min(92vw, 420px)',
-          }}
+          className="popover-surface pointer-events-auto animate-fadeUp flex items-center gap-3 px-3.5 py-2.5 text-[14.5px]"
+          style={{ borderRadius: 14, maxWidth: 'min(92vw, 420px)' }}
         >
           <span className="flex-1">{t.text}</span>
           {t.action ? (
