@@ -1,4 +1,7 @@
 import type { ModelInfo, ProviderConfig } from '../engine/providers/types';
+import { classifyModel, type ModelKind } from '../engine/providers/modelKind';
+
+export type PriceTier = 'free' | 'paid' | 'unverified';
 
 export interface CatalogModel {
   id: string;
@@ -6,9 +9,13 @@ export interface CatalogModel {
   providerId: string;
   providerLabel: string;
   keyless: boolean;
+  kind: ModelKind;
+  price: PriceTier;
+  /** Catalog-declared free. Unknown pricing is not free. */
   free: boolean;
   tools: boolean;
   reasoning: boolean;
+  health?: ModelInfo['health'];
   contextWindow?: number;
 }
 
@@ -17,7 +24,7 @@ export interface CatalogGroup {
   label: string;
   keyless: boolean;
   models: CatalogModel[];
-  /** Models without tool support that stay hidden unless "Show all" is on. */
+  /** Chat models hidden by default (paid/unverified/non-chat) unless "Show all" is on. */
   hidden: number;
 }
 
@@ -32,7 +39,23 @@ export const isMockMode = (): boolean => {
 
 const usable = (model: ModelInfo) => !model.hidden && !model.retired;
 
-const supportsTools = (model: ModelInfo) => model.tools === true;
+export const modelKind = (model: ModelInfo): ModelKind => model.kind ?? classifyModel(model);
+
+export function priceTier(model: ModelInfo): PriceTier {
+  if (model.free === true) return 'free';
+  const pricing = model.pricing;
+  if (pricing && (pricing.in !== undefined || pricing.out !== undefined)) {
+    return (pricing.in ?? 0) === 0 && (pricing.out ?? 0) === 0 ? 'free' : 'paid';
+  }
+  return 'unverified';
+}
+
+/** True when this model may be offered to the user without "Show all". */
+export function isVisibleByDefault(model: ModelInfo): boolean {
+  if (modelKind(model) !== 'chat') return false;
+  if (model.health === 'needs-key' || model.health === 'failed') return false;
+  return priceTier(model) !== 'unverified';
+}
 
 export function buildCatalog(providers: ProviderConfig[], showAll = false): CatalogGroup[] {
   const groups: CatalogGroup[] = [];
@@ -43,7 +66,11 @@ export function buildCatalog(providers: ProviderConfig[], showAll = false): Cata
     let hidden = 0;
     for (const model of provider.models) {
       if (!usable(model)) continue;
-      if (keyless && !showAll && !supportsTools(model)) {
+      const kind = modelKind(model);
+      const price = priceTier(model);
+      // A model that failed or needs a key stays out of the default list even with "Show all".
+      if (model.health === 'needs-key' || model.health === 'failed') continue;
+      if (!showAll && !isVisibleByDefault(model)) {
         hidden += 1;
         continue;
       }
@@ -53,29 +80,53 @@ export function buildCatalog(providers: ProviderConfig[], showAll = false): Cata
         providerId: provider.id,
         providerLabel: provider.label,
         keyless,
-        // Every model of a keyless provider is free to use.
-        free: keyless || Boolean(model.free),
-        tools: supportsTools(model),
+        kind,
+        price,
+        free: price === 'free',
+        tools: model.tools === true,
         reasoning: model.reasoning === true,
+        health: model.health,
         contextWindow: model.contextWindow,
       });
     }
-    if (visible.length) groups.push({ providerId: provider.id, label: provider.label, keyless, models: visible, hidden });
+    if (visible.length || hidden) {
+      groups.push({ providerId: provider.id, label: provider.label, keyless, models: visible, hidden });
+    }
   }
   return groups;
 }
 
 export const flattenCatalog = (groups: CatalogGroup[]): CatalogModel[] => groups.flatMap((g) => g.models);
 
-/** kilo-auto/free when it supports tools, otherwise the free tool-capable model with the largest context. */
+/**
+ * The default model must have passed a real probe. Free and tools-capable
+ * models win; `kilo-auto/free` wins over everything when it passed.
+ */
 export function pickDefaultModel(models: CatalogModel[]): CatalogModel | null {
-  const kilo = models.find((m) => m.id === 'kilo-auto/free' || m.id === 'kilo-auto');
-  if (kilo && kilo.tools) return kilo;
-  const candidates = models.filter((m) => m.free && m.tools);
-  if (candidates.length) {
-    return candidates.reduce((best, m) => ((m.contextWindow ?? 0) > (best.contextWindow ?? 0) ? m : best));
-  }
-  return models.find((m) => m.tools) ?? models[0] ?? null;
+  const tested = models.filter((m) => m.kind === 'chat' && m.health === 'ok');
+  const kilo = tested.find((m) => m.id === 'kilo-auto/free' || m.id === 'kilo-auto');
+  if (kilo) return kilo;
+  if (!tested.length) return null;
+  return [...tested].sort((a, b) => {
+    const free = Number(b.free) - Number(a.free);
+    if (free) return free;
+    const tools = Number(b.tools) - Number(a.tools);
+    if (tools) return tools;
+    return (b.contextWindow ?? 0) - (a.contextWindow ?? 0);
+  })[0];
+}
+
+/** Probe order: free chat models with tools first, then other free chat models. */
+export function probeOrder(models: CatalogModel[]): CatalogModel[] {
+  return [...models]
+    .filter((m) => m.kind === 'chat')
+    .sort((a, b) => {
+      const free = Number(b.free) - Number(a.free);
+      if (free) return free;
+      const tools = Number(b.tools) - Number(a.tools);
+      if (tools) return tools;
+      return (b.contextWindow ?? 0) - (a.contextWindow ?? 0);
+    });
 }
 
 export function findModel(

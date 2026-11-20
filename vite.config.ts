@@ -15,4 +15,9 @@ export default defineConfig({
     // Only the current preview host is trusted; localhost stays allowed by Vite.
     allowedHosts: previewHost ? [previewHost] : [],
   },
+  preview: {
+    host: '0.0.0.0',
+    port: 3000,
+    allowedHosts: previewHost ? [previewHost] : [],
+  },
 });

@@ -15,6 +15,7 @@ export type AgentEvent =
   | { type: 'tool_start'; name: string; args: Record<string, unknown> }
   | { type: 'tool_end'; name: string; ok: boolean; result: string }
   | { type: 'notice'; text: string }
+  | { type: 'banner'; text: string }
   | { type: 'final'; text: string }
   | { type: 'error'; message: string };
 

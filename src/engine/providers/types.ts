@@ -2,10 +2,19 @@ export type Protocol = 'openai-compatible' | 'anthropic';
 export type ProviderKind = 'builtin-free' | 'preset' | 'custom';
 export type Src = 'provider' | 'inferred' | 'tested' | 'user';
 export type CorsStatus = 'unknown' | 'ok' | 'blocked';
+export type ModelHealth = 'ok' | 'needs-key' | 'no-tools' | 'failed';
 
 export interface ModelInfo {
   id: string;
   label: string;
+  /** Chat or another surface (classified by catalog metadata, then by name). */
+  kind?: import('./modelKind').ModelKind;
+  modalities?: string[];
+  modelType?: string;
+  /** Result of the last real probe request. */
+  health?: ModelHealth;
+  healthAt?: number;
+  healthError?: string;
   contextWindow?: number;
   maxOutput?: number;
   free?: boolean;
@@ -69,6 +78,16 @@ export interface ProviderConfig {
   corsStatus: CorsStatus;
   models: ModelInfo[];
   lastCatalogAt?: number;
+  /** Consecutive failures, used for an exponential cooldown instead of retry loops. */
+  failures?: number;
+  cooldownUntil?: number;
+  lastDiagnostic?: {
+    kind: string;
+    status?: number;
+    at: number;
+    retryAfterMs?: number;
+    message?: string;
+  };
 }
 
 export interface ToolCall {

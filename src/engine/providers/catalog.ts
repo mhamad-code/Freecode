@@ -1,4 +1,5 @@
-import type { ModelInfo } from './types';
+import { classifyModel } from './modelKind';
+import type { ModelHealth, ModelInfo } from './types';
 
 export const CATALOG_TTL = 60 * 60 * 1000;
 
@@ -28,8 +29,14 @@ function entries(json: unknown): Rec[] {
   return data.map(asRecord).filter((x): x is Rec => x !== null);
 }
 
+function strList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const list = value.filter((x): x is string => typeof x === 'string');
+  return list.length ? list : undefined;
+}
+
 function baseModel(id: string, label?: string): ModelInfo {
-  return {
+  const model: ModelInfo = {
     id,
     label: label ?? id,
     tools: 'unknown',
@@ -37,6 +44,39 @@ function baseModel(id: string, label?: string): ModelInfo {
     vision: 'unknown',
     provenance: { tools: 'inferred', reasoning: 'inferred', vision: 'inferred' },
   };
+  model.kind = classifyModel(model);
+  return model;
+}
+
+/** Reads optional catalog metadata that lets us classify chat vs. other models. */
+function applyKindMetadata(model: ModelInfo, raw: Rec): ModelInfo {
+  const architecture = asRecord(raw.architecture);
+  const modalities =
+    strList(raw.modalities) ??
+    strList(raw.output_modalities) ??
+    strList(architecture?.output_modalities) ??
+    strList(architecture?.modality);
+  const modelType = str(raw.type) ?? str(raw.model_type);
+  const archText = str(architecture?.modality) ?? str(raw.architecture);
+  if (modalities) model.modalities = modalities;
+  if (modelType) model.modelType = modelType;
+  if (archText) model.modelType = model.modelType ?? archText;
+  model.kind = classifyModel(model);
+  return model;
+}
+
+/** Only a catalog statement (free flag, zero pricing, `:free` suffix) marks a model free. */
+function applyPricing(model: ModelInfo, raw: Rec): ModelInfo {
+  const pricing = asRecord(raw.pricing);
+  const inCost = num(pricing?.prompt) ?? num(pricing?.input) ?? num(raw.prompt_price);
+  const outCost = num(pricing?.completion) ?? num(pricing?.output) ?? num(raw.completion_price);
+  if (inCost !== undefined || outCost !== undefined) {
+    model.pricing = { in: inCost, out: outCost };
+    if ((inCost ?? 0) === 0 && (outCost ?? 0) === 0) model.free = true;
+  }
+  if (raw.free === true || raw.is_free === true) model.free = true;
+  if (/:free/.test(model.id)) model.free = true;
+  return model;
 }
 
 export function parseOpenAICatalog(json: unknown): ModelInfo[] {
@@ -47,7 +87,7 @@ export function parseOpenAICatalog(json: unknown): ModelInfo[] {
       const model = baseModel(id, str(m.name));
       const ctx = num(m.context_length) ?? num(m.context_window);
       if (ctx) model.contextWindow = ctx;
-      return model;
+      return applyPricing(applyKindMetadata(model, m), m);
     })
     .filter((m): m is ModelInfo => m !== null);
 }
@@ -89,7 +129,7 @@ export function parseOpenRouterCatalog(json: unknown): ModelInfo[] {
         model.vision = true;
         model.provenance.vision = 'provider';
       }
-      return model;
+      return applyPricing(applyKindMetadata(model, m), m);
     })
     .filter((m): m is ModelInfo => m !== null);
 }
@@ -108,7 +148,7 @@ export function parseKiloCatalog(json: unknown): ModelInfo[] {
         model.tools = true;
         model.provenance.tools = 'provider';
       }
-      return model;
+      return applyPricing(applyKindMetadata(model, m), m);
     })
     .filter((m): m is ModelInfo => m !== null);
 }
@@ -126,6 +166,19 @@ export function isStale(at: number | undefined, now = Date.now()): boolean {
   return !at || now - at > CATALOG_TTL;
 }
 
+/** Records a real probe result on one model. */
+export function markModelHealth(
+  models: ModelInfo[],
+  id: string,
+  health: ModelHealth,
+  at = Date.now(),
+  error?: string,
+): ModelInfo[] {
+  return models.map((m) =>
+    m.id === id ? { ...m, health, healthAt: at, healthError: error } : m,
+  );
+}
+
 /** Marks models present before but missing now as retired; keeps local flags. */
 export function reconcileModels(prev: ModelInfo[], next: ModelInfo[]): ModelInfo[] {
   const byId = new Map(next.map((m) => [m.id, m]));
@@ -137,6 +190,9 @@ export function reconcileModels(prev: ModelInfo[], next: ModelInfo[]): ModelInfo
         ...fresh,
         hidden: old.hidden,
         custom: old.custom,
+        health: old.health,
+        healthAt: old.healthAt,
+        healthError: old.healthError,
       });
     }
   }

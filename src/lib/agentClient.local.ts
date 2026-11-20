@@ -4,13 +4,16 @@ import type { PermissionMode, Risk } from '../engine/agent/permissions';
 import { WriteGuard } from '../engine/agent/tools/edit';
 import { editFileTool, listFilesTool, readFileTool, writeFileTool } from '../engine/agent/tools/fs';
 import { grepFiles } from '../engine/agent/tools/search';
+import { ProviderError } from '../engine/providers/errors';
 import type { ChatMessage, Delta } from '../engine/providers/types';
 import { decode, type ProjectFS } from '../storage/projectFs';
 import { MemoryFS } from '../storage/projectFs/memory';
 import { FILE_CONTENTS } from './mock';
-import { registryFor, loadProviders, secretFor } from './providersStore';
+import { registryFor, loadProviders, saveProviders, secretFor } from './providersStore';
 import { buildCatalog, findModel, flattenCatalog, pickDefaultModel } from './modelCatalog';
-import type { Lang } from './i18n';
+import { NoWorkingModelError, recordHealth, resolveWorkingModel } from './modelProbe';
+import { translate, type Lang } from './i18n';
+import { recordRequest } from './requestCounter';
 
 export interface AskRequest {
   tool: string;
@@ -75,9 +78,25 @@ export async function hasLiveProvider(preferred?: string): Promise<boolean> {
 }
 
 export async function runLiveTurn(opts: LiveTurnOptions): Promise<{ text: string }> {
-  const choice = liveProviderChoice(opts.model);
-  if (!choice) throw new Error('No configured provider with an available model.');
+  // The default and any selected model must pass a real request first.
+  const resolved = await resolveWorkingModel(opts.model);
+  if (!resolved.choice) throw new NoWorkingModelError(resolved.skipped);
+  const choice = resolved.choice;
+  if (resolved.skipped.length) {
+    opts.onEvent({
+      type: 'notice',
+      text: translate(opts.lang, 'model.switched', {
+        skipped: resolved.skipped.map((s) => s.modelId).join(', '),
+        model: choice.modelId,
+      }),
+    });
+  }
   const registry = registryFor(loadProviders());
+  const known = loadProviders().find((p) => p.id === choice.providerId)?.models.find((m) => m.id === choice.modelId);
+  let replyOnly = known?.health === 'no-tools';
+  if (replyOnly) {
+    opts.onEvent({ type: 'banner', text: translate(opts.lang, 'model.replyOnly') });
+  }
   const fs = await sessionFs(opts.sessionId);
   const guard = new WriteGuard();
   const io = { fs, guard };
@@ -197,8 +216,33 @@ export async function runLiveTurn(opts: LiveTurnOptions): Promise<{ text: string
     signal: opts.signal,
     ask: opts.ask,
     onEvent: opts.onEvent,
-    model: (req, onDelta: (delta: Delta) => void) =>
-      registry.chat(choice.providerId, { ...req, model: choice.modelId }, onDelta),
+    model: async (req, onDelta: (delta: Delta) => void) => {
+      recordRequest(choice.providerId);
+      const request = replyOnly
+        ? { ...req, model: choice.modelId, tools: undefined, toolChoice: undefined }
+        : { ...req, model: choice.modelId };
+      try {
+        return await registry.chat(choice.providerId, request, onDelta);
+      } catch (err) {
+        if (replyOnly || !(err instanceof ProviderError) || err.code !== 'unsupported-tools') {
+          throw err;
+        }
+        // The model answered, it just cannot call tools: retry as plain chat.
+        replyOnly = true;
+        saveProviders(
+          recordHealth(loadProviders(), choice.providerId, choice.modelId, {
+            status: 'no-tools',
+            error: err.providerMessage ?? err.message,
+          }),
+        );
+        opts.onEvent({ type: 'banner', text: translate(opts.lang, 'model.replyOnly') });
+        return registry.chat(
+          choice.providerId,
+          { ...req, model: choice.modelId, tools: undefined, toolChoice: undefined },
+          onDelta,
+        );
+      }
+    },
   });
 
   return { text: result.text };

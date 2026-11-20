@@ -38,7 +38,9 @@ export interface AssistantTurn {
   startedAt: number;
   durationMs?: number;
   stopped?: boolean;
-  error?: { title: string; message: string; details: string };
+  error?: { title: string; message: string; details: string; code?: 'no-model' };
+  /** Persistent notice for this turn, e.g. a model that cannot use tools. */
+  banner?: string;
   permission?: Permission;
   collapsed: boolean;
   checkpoint?: { id: string; label: string; files: number };

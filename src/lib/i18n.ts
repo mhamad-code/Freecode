@@ -68,6 +68,17 @@ export const en = {
   'model.empty': 'No models yet. Refresh a provider in Settings → Providers.',
   'model.showAll': 'Show all (+{n})',
   'model.showLess': 'Hide models without tools',
+  'model.notChat': 'Not a chat model',
+  'model.unverified': 'Unverified',
+  'model.testedOk': 'Tested',
+  'model.noWorking': 'No working free model right now',
+  'model.noWorkingShort': 'No working model',
+  'model.noWorkingHint': 'Every free model was rejected by its provider. Add your own key or retry the model tests.',
+  'model.addKey': 'Add my key',
+  'model.needsKey': '{model} needs a key from its provider. It is hidden now.',
+  'model.probeFailed': '{model} did not answer a test request.',
+  'model.switched': 'Skipped {skipped} (needs a key). Using {model}.',
+  'model.replyOnly': 'This model has no tools: it only replies, it cannot run commands or edit files. Pick a tools-capable model for edits.',
   'composer.context': 'Context',
   'composer.compact': 'Compact conversation',
   'composer.permissionAsk': 'Ask every time',
@@ -327,7 +338,7 @@ export const en = {
   'providers.disabled': 'Disabled',
   'providers.models': '{n} models',
   'providers.keys': 'keys',
-  'providers.test': 'Refresh',
+  'providers.test': 'Test',
   'providers.add': 'Add provider',
   'providers.yourProviders': 'Your providers',
   'providers.empty': 'No providers yet. Add one to use your own key.',
@@ -335,6 +346,39 @@ export const en = {
   'providers.ok': 'Connected · {n} models',
   'providers.failed': 'Connection failed: {code}',
   'providers.keyFailed': 'Could not save the key on this device.',
+  'providers.keyFailedCode': 'Could not save the key: {reason}',
+  'providers.keySavedUntested': 'The key is saved on this device, but the connection test failed.',
+  'providers.keySavedOk': 'Key saved and verified.',
+  'providers.okModel': 'Testing works: {model}',
+  'providers.copyDiagnostics': 'Copy diagnostics',
+  'providers.diagnosticsCopied': 'Diagnostics copied',
+  'providers.moreFree': 'More free options',
+  'providers.chatOnly': 'Chat only',
+  'providers.unverified': 'Unverified',
+  'providers.testNoModel': 'Connection is fine, no model was tested',
+  'providers.testedModel': 'Tested {model}',
+  'providers.needsKey': 'Needs a key',
+  'providers.badKey': 'The provider rejected this key',
+  'providers.cooldown': 'Cooling down · retry in {s}s',
+  'providers.requestsLeft': '~{n} requests left this hour',
+  'providers.retryTest': 'Retry test',
+  'providers.diag.ok': 'Reachable',
+  'providers.diag.cors': 'Blocked by CORS (the service itself is reachable)',
+  'providers.diag.network': 'Cannot reach the service from your network',
+  'providers.diag.auth': 'The service refused anonymous access (403)',
+  'providers.diag.rate': 'Rate limited (wait {s}s)',
+  'providers.diag.server': 'The service returned HTTP {status}',
+  'providers.diag.http': 'The service rejected the request (HTTP {status})',
+  'providers.diag.timeout': 'The service took too long to answer',
+  'providers.diag.failed': 'The test failed: {error}',
+  'vault.no-crypto': 'WebCrypto is unavailable in this browser.',
+  'vault.insecure-context': 'Keys need HTTPS (or localhost). Open the app over HTTPS.',
+  'vault.keygen': 'The browser could not create an encryption key.',
+  'vault.no-indexeddb': 'IndexedDB is disabled, so nothing can be stored.',
+  'vault.blocked': 'The browser blocked site storage (private mode or blocked site data).',
+  'vault.quota': 'This device has no storage space left.',
+  'vault.write': 'IndexedDB rejected the write.',
+  'vault.readback': 'The key was written but could not be read back. Try another browser.',
 } as const;
 
 type Dict = Record<string, string>;
@@ -404,6 +448,17 @@ export const ar: Dict = {
   'model.empty': 'لا توجد نماذج بعد. حدّث مزوّدًا من الإعدادات ← Providers.',
   'model.showAll': 'عرض الكل (+{n})',
   'model.showLess': 'إخفاء النماذج بلا أدوات',
+  'model.notChat': 'ليس نموذج محادثة',
+  'model.unverified': 'غير موثّق',
+  'model.testedOk': 'مُختبر',
+  'model.noWorking': 'لا يوجد نموذج مجاني يعمل الآن',
+  'model.noWorkingShort': 'لا نموذج يعمل',
+  'model.noWorkingHint': 'رفض المزوّد كل نموذج مجاني. أضف مفتاحك أو أعد اختبار النماذج.',
+  'model.addKey': 'أضف مفتاحي',
+  'model.needsKey': '{model} يحتاج مفتاحاً من مزوّده؛ أخفيته الآن.',
+  'model.probeFailed': '{model} لم يرد على طلب الاختبار.',
+  'model.switched': 'تجاوزت {skipped} (يحتاج مفتاحاً). أستخدم {model}.',
+  'model.replyOnly': 'هذا النموذج بدون أدوات: رد فقط، ولا ينفذ أوامر ولا يعدّل ملفات. اختر نموذجاً يدعم الأدوات للتعديل.',
   'composer.context': 'السياق',
   'composer.compact': 'ضغط المحادثة',
   'composer.permissionAsk': 'اسأل في كل مرة',
@@ -663,7 +718,7 @@ export const ar: Dict = {
   'providers.disabled': 'معطّل',
   'providers.models': '{n} نموذج',
   'providers.keys': 'مفاتيح',
-  'providers.test': 'تحديث',
+  'providers.test': 'اختبار',
   'providers.add': 'أضف مزوّداً',
   'providers.yourProviders': 'مزوّدوك',
   'providers.empty': 'لا مزوّدين بعد. أضف واحداً لاستخدام مفتاحك.',
@@ -671,6 +726,39 @@ export const ar: Dict = {
   'providers.ok': 'متصل · {n} نموذج',
   'providers.failed': 'فشل الاتصال: {code}',
   'providers.keyFailed': 'تعذّر حفظ المفتاح على هذا الجهاز.',
+  'providers.keyFailedCode': 'تعذّر حفظ المفتاح: {reason}',
+  'providers.keySavedUntested': 'حُفظ المفتاح على هذا الجهاز، لكن اختبار الاتصال فشل.',
+  'providers.keySavedOk': 'حُفظ المفتاح وتم التحقق منه.',
+  'providers.okModel': 'الاختبار نجح: {model}',
+  'providers.copyDiagnostics': 'نسخ التشخيص',
+  'providers.diagnosticsCopied': 'تم نسخ التشخيص',
+  'providers.moreFree': 'خيارات مجانية أخرى',
+  'providers.chatOnly': 'دردشة فقط',
+  'providers.unverified': 'غير موثّق',
+  'providers.testNoModel': 'الاتصال سليم، لم يُختبر نموذج',
+  'providers.testedModel': 'اختُبر {model}',
+  'providers.needsKey': 'يحتاج مفتاحاً',
+  'providers.badKey': 'المزوّد رفض هذا المفتاح',
+  'providers.cooldown': 'تهدئة · أعد المحاولة بعد {s} ثانية',
+  'providers.requestsLeft': '~{n} طلباً متبقياً هذه الساعة',
+  'providers.retryTest': 'أعد الاختبار',
+  'providers.diag.ok': 'الخدمة متاحة',
+  'providers.diag.cors': 'محجوب بواسطة CORS (الخدمة نفسها متاحة)',
+  'providers.diag.network': 'لا يمكن الوصول للخدمة من شبكتك',
+  'providers.diag.auth': 'الخدمة رفضت الوصول المجهول (403)',
+  'providers.diag.rate': 'حد الطلبات (انتظر {s} ثانية)',
+  'providers.diag.server': 'الخدمة أعادت HTTP {status}',
+  'providers.diag.http': 'الخدمة رفضت الطلب (HTTP {status})',
+  'providers.diag.timeout': 'الخدمة تأخرت كثيراً في الرد',
+  'providers.diag.failed': 'فشل الاختبار: {error}',
+  'vault.no-crypto': 'WebCrypto غير متاح في هذا المتصفح.',
+  'vault.insecure-context': 'المفاتيح تحتاج HTTPS (أو localhost). افتح التطبيق عبر HTTPS.',
+  'vault.keygen': 'تعذّر على المتصفح إنشاء مفتاح تشفير.',
+  'vault.no-indexeddb': 'IndexedDB معطّل، لذلك لا يمكن تخزين شيء.',
+  'vault.blocked': 'المتصفح منع تخزين الموقع (وضع خاص أو بيانات موقع محجوبة).',
+  'vault.quota': 'لا توجد مساحة تخزين متبقية على هذا الجهاز.',
+  'vault.write': 'رفض IndexedDB عملية الكتابة.',
+  'vault.readback': 'كُتب المفتاح لكن تعذّرت قراءته. جرّب متصفحاً آخر.',
 };
 
 const dicts: Record<Lang, Dict> = { en: en as unknown as Dict, ar };
@@ -688,12 +776,14 @@ export const useLang = create<I18nState>((set) => ({
   },
 }));
 
+export function translate(lang: Lang, key: string, vars?: Record<string, string | number>): string {
+  let str = dicts[lang][key] ?? (en as Dict)[key] ?? key;
+  if (vars) for (const [k, v] of Object.entries(vars)) str = str.replace(`{${k}}`, String(v));
+  return str;
+}
+
 export const useI18n = () => {
   const lang = useLang((s) => s.lang);
-  const t = (key: string, vars?: Record<string, string | number>) => {
-    let str = dicts[lang][key] ?? (en as Dict)[key] ?? key;
-    if (vars) for (const [k, v] of Object.entries(vars)) str = str.replace(`{${k}}`, String(v));
-    return str;
-  };
+  const t = (key: string, vars?: Record<string, string | number>) => translate(lang, key, vars);
   return { t, lang, dir: lang === 'ar' ? ('rtl' as const) : ('ltr' as const) };
 };

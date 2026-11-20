@@ -21,6 +21,7 @@ import {
   ThumbsUp,
   Undo2,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import type { AssistantTurn, Group, Message, Permission, ToolKind } from '../lib/types';
 import { useI18n } from '../lib/i18n';
@@ -334,9 +335,17 @@ function PermissionCard({ perm }: { perm: Permission }) {
 
 function ErrorBlock({ turn }: { turn: AssistantTurn }) {
   const { t } = useI18n();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const send = useStore((s) => s.send);
   if (!turn.error) return null;
+  const noModel = turn.error.code === 'no-model';
+  const retry = () => {
+    const state = useStore.getState();
+    const session = state.sessions.find((s) => s.id === state.activeSessionId);
+    const lastUser = session ? [...session.messages].reverse().find((m) => m.kind === 'user') : undefined;
+    if (lastUser && lastUser.kind === 'user') send(lastUser.text);
+  };
   return (
     <div
       className="my-3 p-3.5"
@@ -360,9 +369,22 @@ function ErrorBlock({ turn }: { turn: AssistantTurn }) {
           {turn.error.details}
         </pre>
       ) : null}
-      <div className="flex gap-2 mt-3">
-        <Btn size="sm" variant="outline" onClick={() => send('Retry the build')}>{t('chat.retry')}</Btn>
-        <Btn size="sm" variant="primary" onClick={() => send('Fix the build error')}>{t('chat.askFix')}</Btn>
+      <div className="flex flex-wrap gap-2 mt-3">
+        {noModel ? (
+          <>
+            <Btn size="sm" variant="primary" onClick={() => navigate('/settings/providers')}>
+              {t('model.addKey')}
+            </Btn>
+            <Btn size="sm" variant="outline" onClick={retry}>
+              {t('common.retry')}
+            </Btn>
+          </>
+        ) : (
+          <>
+            <Btn size="sm" variant="outline" onClick={retry}>{t('common.retry')}</Btn>
+            <Btn size="sm" variant="primary" onClick={() => send('Fix the build error')}>{t('chat.askFix')}</Btn>
+          </>
+        )}
       </div>
     </div>
   );
@@ -465,6 +487,19 @@ function AssistantMessage({ turn, onComment }: { turn: AssistantTurn; onComment:
             )}
           </div>
           {turn.permission ? <PermissionCard perm={turn.permission} /> : null}
+          {turn.banner ? (
+            <div
+              className="my-2 flex items-start gap-2 px-3 py-2 rounded-xl text-[13.5px]"
+              style={{
+                border: '1px solid color-mix(in srgb, var(--warning) 55%, transparent)',
+                background: 'color-mix(in srgb, var(--warning) 10%, transparent)',
+              }}
+              role="status"
+            >
+              <AlertTriangle size={16} style={{ color: 'var(--warning)', flex: 'none', marginTop: 1 }} />
+              <span>{turn.banner}</span>
+            </div>
+          ) : null}
           <ErrorBlock turn={turn} />
         </div>
       </div>

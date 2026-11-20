@@ -16,9 +16,18 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { useI18n } from '../lib/i18n';
-import { buildCatalog, flattenCatalog, isMockMode, pickDefaultModel } from '../lib/modelCatalog';
+import {
+  buildCatalog,
+  flattenCatalog,
+  isMockMode,
+  pickDefaultModel,
+  type CatalogModel,
+} from '../lib/modelCatalog';
+import { probeModel, recordHealth, resolveWorkingModel } from '../lib/modelProbe';
+import { loadProviders, saveProviders } from '../lib/providersStore';
 import { useCatalog } from '../lib/useCatalog';
 import type { Effort, Mode } from '../lib/types';
 import { Badge, Btn, IBtn, Kbd, Menu, MenuItem, SearchInput, Segmented, Tip, useMedia } from './ui';
@@ -57,6 +66,7 @@ function ContextRing({ pct, onOpen }: { pct: number; onOpen: () => void }) {
 
 export function Composer() {
   const { t } = useI18n();
+  const navigate = useNavigate();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId))!;
   const send = useStore((s) => s.send);
   const stop = useStore((s) => s.stop);
@@ -64,6 +74,7 @@ export function Composer() {
   const setMode = useStore((s) => s.setSessionMode);
   const setModel = useStore((s) => s.setModel);
   const setEffort = useStore((s) => s.setEffort);
+  const toast = useStore((s) => s.toast);
   const usage = useStore((s) => s.sessionUsage);
   const skills = useStore((s) => s.skills);
   const files = useStore((s) => s.files);
@@ -76,6 +87,8 @@ export function Composer() {
   const [error, setError] = useState(false);
   const [modelQuery, setModelQuery] = useState('');
   const [showAll, setShowAll] = useState(false);
+  const [probing, setProbing] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const providers = useCatalog();
@@ -90,7 +103,9 @@ export function Composer() {
     .filter((g) => g.models.length > 0);
   const demoModels = DEMO_MODELS.filter((m) => `${m.id} ${m.desc}`.toLowerCase().includes(query));
   const activeModel = catalog.find((m) => m.id === session.model);
-  const triggerLabel = mock ? session.model : activeModel?.label ?? defaultModel?.label ?? session.model;
+  const triggerLabel = mock
+    ? session.model
+    : activeModel?.label ?? defaultModel?.label ?? t('model.noWorkingShort');
   const isWide = useMedia('(min-width: 640px)');
   const running = session.status === 'running';
 
@@ -133,6 +148,36 @@ export function Composer() {
     }, 160);
     return () => window.clearInterval(id);
   }, [dictating, t]);
+
+  const selectModel = async (model: CatalogModel) => {
+    setModel(model.id);
+    setModelQuery('');
+    if (model.health === 'ok') return;
+    setProbing(model.id);
+    try {
+      const outcome = await probeModel(model.providerId, model.id);
+      saveProviders(recordHealth(loadProviders(), model.providerId, model.id, outcome));
+      if (outcome.status === 'needs-key') toast(t('model.needsKey', { model: model.id }));
+      if (outcome.status === 'failed') toast(t('model.probeFailed', { model: model.id }));
+    } finally {
+      setProbing(null);
+    }
+  };
+
+  const retryModels = async () => {
+    setRetrying(true);
+    try {
+      const result = await resolveWorkingModel(session.model);
+      if (result.choice) {
+        setModel(result.choice.modelId);
+        toast(t('providers.okModel', { model: result.choice.modelId }));
+      } else {
+        toast(t('model.noWorking'));
+      }
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   const submit = (value?: string) => {
     const v = (value ?? text).trim();
@@ -370,14 +415,18 @@ export function Composer() {
                           <button
                             key={`${group.providerId}:${m.id}`}
                             type="button"
-                            onClick={() => setModel(m.id)}
+                            onClick={() => void selectModel(m)}
                             className="w-full px-2 py-1.5 rounded-[9px] text-start hover:bg-[var(--hover)]"
                           >
-                            <div className="flex items-center gap-1.5 text-[14px]">
+                            <div className="flex items-center gap-1.5 text-[14px] flex-wrap">
                               <span className="flex-1 truncate" dir="ltr">{m.label}</span>
+                              {probing === m.id ? <span className="spinner" /> : null}
                               {m.free ? <Badge tone="accent">{t('model.free')}</Badge> : null}
+                              {m.price === 'unverified' ? <Badge tone="warning">{t('model.unverified')}</Badge> : null}
+                              {m.kind !== 'chat' ? <Badge tone="neutral">{t('model.notChat')}</Badge> : null}
                               {m.tools ? <Badge>{t('model.tools')}</Badge> : null}
                               {m.reasoning ? <Badge tone="info">{t('model.reasoning')}</Badge> : null}
+                              {m.health === 'ok' ? <Badge tone="accent">{t('model.testedOk')}</Badge> : null}
                               {session.model === m.id ? <Check size={15} className="text-[var(--accent)]" /> : null}
                             </div>
                             <div className="text-[12px] text-[var(--muted)] truncate" dir="ltr">
@@ -390,7 +439,28 @@ export function Composer() {
                     ))}
                 {!mock && visibleGroups.length === 0 ? (
                   <div className="px-2 py-6 text-center text-[13.5px] text-[var(--muted)]">
-                    {query ? t('palette.noResults', { q: modelQuery }) : t('model.empty')}
+                    <div>{query ? t('palette.noResults', { q: modelQuery }) : t('model.noWorking')}</div>
+                    {!query ? (
+                      <div className="flex flex-wrap justify-center gap-2 mt-3">
+                        <button
+                          type="button"
+                          onClick={() => void retryModels()}
+                          disabled={retrying}
+                          className="btn btn-outline btn-sm"
+                        >
+                          {retrying ? <span className="spinner" /> : null}
+                          {t('common.retry')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => navigate('/settings/providers')}
+                          className="btn btn-primary btn-sm"
+                        >
+                          {t('model.addKey')}
+                        </button>
+                      </div>
+                    ) : null}
+                    {!query && hiddenCount > 0 ? null : null}
                   </div>
                 ) : null}
                 {hiddenCount > 0 ? (

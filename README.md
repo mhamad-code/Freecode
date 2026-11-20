@@ -46,11 +46,18 @@ The real engine lives under `src/engine/` and `src/storage/`:
   `ProjectFS` contract with OPFS primary + IndexedDB fallback + in-memory backend, and pure
   migrations.
 
-Settings → **Providers** lets you refresh a free provider's catalog or add your own key. Keys are
-stored encrypted in IndexedDB and never written to `localStorage`. Once a provider has a
-discovered model, `send()` uses `src/lib/agentClient.local.ts`; otherwise it falls back to the
-demo scenario. `docs/KNOWN_LIMITS.md` lists what is not implemented yet (auth bridge,
-WebContainers, Git/MCP, ZIP backups).
+Settings → **Providers** lets you test a free provider or add your own key. Keys are stored
+encrypted in IndexedDB **before** any connection test, and a failed test never discards them.
+The model list shows text chat models only; audio, image, embedding, rerank and moderation
+models appear under **Show all** with a "Not a chat model" badge. A model counts as free only
+when its catalog says so; unknown pricing is "Unverified" and hidden by default. Before a model
+is used as the default, the app sends one tiny real request and records `ok`, `needs key`,
+`no tools` or `failed`; models that need a key are skipped automatically and a model without
+tools is retried as plain chat with a banner. Real sends go through
+`src/lib/agentClient.local.ts`; the demo scenario is only reachable with `?mock=1`.
+Provider failures are diagnosed as CORS vs. network vs. HTTP/Retry-After, and each card has
+**Copy diagnostics** for a redacted report. `docs/KNOWN_LIMITS.md` lists the measured results
+and what is not implemented yet (auth bridge, WebContainers, Git/MCP, ZIP backups).
 
 Data: **Settings → General → Data** exports/imports a JSON backup and can reset or delete local
 state.

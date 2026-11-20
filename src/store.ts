@@ -34,7 +34,9 @@ import {
   uid,
 } from './lib/mock';
 import type { Lang } from './lib/i18n';
-import { hasLiveProvider, runLiveTurn, type AskRequest } from './lib/agentClient.local';
+import { runLiveTurn, type AskRequest } from './lib/agentClient.local';
+import { NoWorkingModelError } from './lib/modelProbe';
+import { translate } from './lib/i18n';
 import { isMockMode } from './lib/modelCatalog';
 import type { PermissionMode } from './engine/agent/permissions';
 import { ERROR_HINT, ProviderError } from './engine/providers/errors';
@@ -344,14 +346,13 @@ export const useStore = create<AppStore>((set, get) => ({
     const token = ++runToken;
     const mode = session.mode;
     void (async () => {
-      try {
-        if (!isMockMode() && (await hasLiveProvider(session.model))) {
-          if (token !== runToken) return;
-          await runLive(sid, turnId, text, mode, session.model, token, set, get);
-          return;
-        }
-      } catch {
-        // Fall back to the demo scenario when the live path is unavailable.
+      // Real providers are attempted whenever they are not mocked. When no
+      // model passes its probe, the turn shows a clear error instead of a
+      // pretend demo answer.
+      if (!isMockMode()) {
+        if (token !== runToken) return;
+        await runLive(sid, turnId, text, mode, session.model, token, set, get);
+        return;
       }
       if (token !== runToken) return;
       void runScenario(sid, turnId, buildScenario(text, mode, get().lang), token, set, get);
@@ -933,6 +934,12 @@ async function runLive(
           textBlockId = null;
         } else if (event.type === 'notice') {
           get().toast(event.text);
+        } else if (event.type === 'banner') {
+          set((s) => ({
+            sessions: patchTurn(s.sessions, sid, turnId, (t) => {
+              t.banner = event.text;
+            }),
+          }));
         }
       },
     });
@@ -950,6 +957,7 @@ async function runLive(
     const code = err instanceof ProviderError ? err.code : 'network';
     const message = err instanceof Error ? err.message : String(err);
     const stopped = code === 'aborted';
+    const noModel = err instanceof NoWorkingModelError;
     set((s) => ({
       sessions: patchTurn(s.sessions, sid, turnId, (t) => {
         t.running = false;
@@ -957,9 +965,16 @@ async function runLive(
         t.permission = undefined;
         t.durationMs = Date.now() - t.startedAt;
         t.error = {
-          title: stopped ? 'Stopped' : 'Model error',
-          message,
-          details: ERROR_HINT[code],
+          title: stopped
+            ? 'Stopped'
+            : noModel
+              ? translate(get().lang, 'model.noWorking')
+              : 'Model error',
+          message: noModel
+            ? translate(get().lang, 'model.noWorkingHint')
+            : message,
+          details: noModel ? message : ERROR_HINT[code],
+          code: noModel ? 'no-model' : undefined,
         };
       }).map((x) => (x.id === sid ? { ...x, status: stopped ? ('idle' as const) : ('error' as const) } : x)),
     }));

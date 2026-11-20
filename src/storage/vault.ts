@@ -111,8 +111,11 @@ export class Vault {
     private readonly key: CryptoKey,
   ) {}
 
-  static async open(profileId: string): Promise<Vault> {
-    const db = await openProfileDb(profileId);
+  static async open(
+    profileId: string,
+    deps: { db?: KeyValueDB } = {},
+  ): Promise<Vault> {
+    const db = deps.db ?? (await openProfileDb(profileId));
     const stored = (await db.get('vaultKeys', 'master')) as CryptoKey | undefined;
     if (stored) return new Vault(db, stored);
     const key = await generateVaultKey();
