@@ -57,26 +57,31 @@ state.
 
 See `docs/ARCHITECTURE.md` and `SETUP.md`.
 
-## Deploy on Netlify
+## Deploy on Cloudflare Pages
 
-The build is static; Netlify serves `dist/` and the two files in `public/` are copied into it:
+The build is static; Cloudflare Pages serves `dist/`. Two files in `public/` are copied into it:
 `_headers` (cross-origin isolation) and `_redirects` (`/*  /index.html  200`, SPA routes).
-`netlify.toml` sets the build command, publish directory and Node 20.
+`.node-version` pins Node 20 for the build image.
 
 From a phone:
 
-1. Open <https://app.netlify.com/start> and choose **Import from Git**.
-2. Authorize GitHub if asked, then pick the `Freecode` repository.
-3. Keep the detected settings, or set **Build command** to `npm run build` and
-   **Publish directory** to `dist`. Node version comes from `netlify.toml`.
-4. Tap **Deploy site**. Every later push to `main` rebuilds automatically.
+1. Open the Cloudflare dashboard → **Workers & Pages**.
+2. Tap **Create** → **Pages** → **Connect to Git**.
+3. Authorize GitHub if asked and pick the `Freecode` repository.
+4. Set **Build command** to `npm run build` and **Output directory** to `dist`.
+5. Add an environment variable `NODE_VERSION` = `20`.
+6. Tap **Save and Deploy**. Every later push to `main` rebuilds automatically.
 
-The GitHub workflow now only runs typecheck, tests and the build; it does not deploy. The
-current deployment is <https://freecode-mhamad.netlify.app>.
+The GitHub workflow (`build.yml`) only runs `npm ci`, `tsc -b`, `npm test` and
+`npm run build`; it does not deploy.
 
 ### Check cross-origin isolation after deploy
 
-Open the site, then in the browser console:
+Open the site, then go to **Settings → General → Data → Runtime status**. It shows the same
+values inside the app: runtime state (Full/Limited), whether `crossOriginIsolated` is true, and
+the reason when the runtime is limited. The limited banner must not appear on the deployed site.
+
+You can also verify in the browser console:
 
 ```js
 crossOriginIsolated        // must be true
@@ -86,7 +91,7 @@ typeof SharedArrayBuffer   // "function"
 Or check the response headers:
 
 ```bash
-curl -I https://<site>.netlify.app/
+curl -I https://<project>.pages.dev/
 # Cross-Origin-Opener-Policy: same-origin
 # Cross-Origin-Embedder-Policy: credentialless
 ```

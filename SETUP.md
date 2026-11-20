@@ -12,7 +12,7 @@ npm run build      # emits dist/
 Host `dist/` on any static host. Two header sets are provided:
 
 - `firebase.json` — Firebase Hosting (routes, rewrites and COOP/COEP headers).
-- `public/_headers` — Cloudflare Pages / Netlify style.
+- `public/_headers` — Cloudflare Pages header rules.
 
 After deploying, confirm cross-origin isolation:
 
