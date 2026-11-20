@@ -8,7 +8,6 @@ import { ProviderError } from '../engine/providers/errors';
 import type { ChatMessage, Delta } from '../engine/providers/types';
 import { decode, type ProjectFS } from '../storage/projectFs';
 import { MemoryFS } from '../storage/projectFs/memory';
-import { FILE_CONTENTS } from './mock';
 import { registryFor, loadProviders, saveProviders, secretFor } from './providersStore';
 import { buildCatalog, findModel, flattenCatalog, pickDefaultModel } from './modelCatalog';
 import { NoWorkingModelError, recordHealth, resolveWorkingModel } from './modelProbe';
@@ -40,10 +39,6 @@ async function sessionFs(sessionId: string): Promise<ProjectFS> {
   const existing = fsBySession.get(sessionId);
   if (existing) return existing;
   const fs = new MemoryFS();
-  await fs.mkdir('src');
-  for (const [path, content] of Object.entries(FILE_CONTENTS)) {
-    await fs.write(path, content);
-  }
   fsBySession.set(sessionId, fs);
   return fs;
 }
@@ -196,7 +191,7 @@ export async function runLiveTurn(opts: LiveTurnOptions): Promise<{ text: string
   ];
 
   const system = buildSystemPrompt({
-    projectRoot: 'VEXORA Complete',
+    projectRoot: '',
     runtime: 'limited',
     permissionMode: opts.permissionMode,
     mode: opts.mode,

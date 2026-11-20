@@ -2,6 +2,21 @@
 
 Everything below is what this build actually does and what remains unverified. Do not treat the list as a roadmap promise.
 
+## F0 — demo data removal (this build)
+
+Verified in this workspace:
+
+- The production bundle contains no demo fixtures (`VEXORA`, `AndroidHarness`, `Clone Website Request`, `Design System Extractor`, `24.7M`, `mohammed-hamra`, `feature/activity-ui`, fake key literals). `node scripts/check-bundle.mjs` passes and `src/lib/__tests__/noFixtures.test.ts` fails the build if a fixture string returns outside `src/lib/mock/`.
+- Fixtures live only in `src/lib/mock/` and are reached through `await import('./lib/mock/scenario')` when `?mock=1`; the entry chunk no longer includes them.
+- A fresh profile (real Chromium against `scripts/serve-dist.mjs`, `crossOriginIsolated === true`) shows: one blank chat, "What should we build?", no projects, "No files yet", "No activity yet", "No checkpoints yet", "Nothing to commit", "No plan yet", Sites "No sites yet", usage zeros, Account "Guest", Project settings "No project". AR/RTL checked on the home screen. No page errors on `/`, `/sites`, `/integrations`, `/settings/{general,project,account,usage}`.
+- Screenshots: `docs/verification/f0-home-empty.png`, `f0-home-empty-ar.png`, `f0-sites-empty.png`, `f0-files-empty.png`, `f0-overview-empty.png`.
+
+Not verified / still missing:
+
+- The rejection of every fixture string is checked in source and in `dist/assets/*.js` only; it does not audit future chunks produced by F1–F9.
+- Playwright's bundled Chromium could not be downloaded in this VM, so `npm run test:e2e` was not executed; the same checks were done in the cloud Chromium.
+- The agent's project FS starts empty, so a real project cannot be read by the agent until F4/F5.
+
 ## Verified in this workspace
 
 - `npx tsc -b` passes (strict).

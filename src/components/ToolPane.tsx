@@ -5,10 +5,8 @@ import {
   ArrowRight,
   BarChart3,
   Check,
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
-  Circle,
   History,
   Columns2,
   Copy,
@@ -37,7 +35,6 @@ import {
 import { useStore } from '../store';
 import { useI18n } from '../lib/i18n';
 import type { ChangedFile, FileNode, ToolTab } from '../lib/types';
-import { FILE_CONTENTS } from '../lib/mock';
 import {
   Badge,
   Btn,
@@ -46,7 +43,6 @@ import {
   Input,
   Menu,
   MenuItem,
-  Progress,
   SearchInput,
   SectionTitle,
   Segmented,
@@ -289,7 +285,13 @@ function FilesPanel() {
         </IBtn>
       </div>
       <div className="flex-1 overflow-y-auto px-2 pb-3">
-        {filtered.length === 0 ? (
+        {!files.length ? (
+          <div className="text-center px-4 py-10">
+            <Folder size={22} className="mx-auto text-[var(--faint)]" />
+            <div className="text-[14.5px] font-semibold mt-2">{t('file.empty')}</div>
+            <p className="text-[13px] text-[var(--muted)] mt-1">{t('file.emptyBody')}</p>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="text-center text-[14.5px] text-[var(--muted)] py-8">{t('file.noMatch')}</div>
         ) : (
           filtered.map((n) => renderNode(n, 0))
@@ -302,12 +304,12 @@ function FilesPanel() {
 function EditorPanel({ path }: { path: string }) {
   const contents = useStore((s) => s.fileContents);
   const save = useStore((s) => s.saveFile);
-  const [value, setValue] = useState(contents[path] ?? FILE_CONTENTS[path] ?? '// Empty file\n');
+  const [value, setValue] = useState(contents[path] ?? '');
   const lines = value.split('\n');
   useEffect(() => {
-    setValue(contents[path] ?? FILE_CONTENTS[path] ?? '// Empty file\n');
+    setValue(contents[path] ?? '');
   }, [path, contents]);
-  const dirty = value !== (contents[path] ?? FILE_CONTENTS[path] ?? '// Empty file\n');
+  const dirty = value !== (contents[path] ?? '');
 
   return (
     <div className="h-full flex flex-col">
@@ -496,7 +498,7 @@ function PreviewPanel() {
 }
 
 /* ================================ terminal ================================ */
-const BOOT_LINES = ['Welcome to Freecode terminal', 'Workspace ready in 842ms'];
+const BOOT_LINES: string[] = [];
 
 function useTerminal() {
   const [lines, setLines] = useState<string[]>(BOOT_LINES);
@@ -521,19 +523,8 @@ export function TerminalPanel({ compact }: { compact?: boolean }) {
   }, [lines]);
 
   const run = (cmd: string) => {
-    const out: string[] = [`~/project $ ${cmd}`];
-    const c = cmd.trim();
-    if (c === 'ls') out.push('AndroidHarness.java  index.html  package.json  public  signing.jks', 'src  UNCHANGED_NAME_OCCURRENCES.txt  vite.config.ts');
-    else if (c === 'pwd') out.push('/home/user/vexora');
-    else if (c === 'git status') out.push('On branch main', 'Your branch is ahead of origin/main by 2 commits.', 'Changes not staged for commit:', '  modified: vite.config.ts');
-    else if (c === 'npm run build') out.push('vite v5.4.11 building for production...', '✓ 42 modules transformed.', 'dist/assets/index-Ck2f.js  184.22 kB │ gzip: 59.10 kB', '✓ built in 1.84s');
-    else if (c === 'help') out.push('Commands: ls, pwd, git status, npm run build, clear, help');
-    else if (c === 'clear') {
-      setLines([]);
-      setInput('');
-      return;
-    } else if (c) out.push(`bash: ${c}: command not found`);
-    setLines((l) => [...l, ...out]);
+    if (!cmd.trim()) return;
+    setLines((l) => [...l, `~/project $ ${cmd}`, t('terminal.noRuntime')]);
     setInput('');
   };
 
@@ -600,90 +591,48 @@ export function TerminalPanel({ compact }: { compact?: boolean }) {
 /* ================================ overview ================================ */
 function OverviewPanel() {
   const { t } = useI18n();
-  const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId))!;
+  const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId));
   const git = useStore((s) => s.git);
   const usage = useStore((s) => s.sessionUsage);
   const openTool = useStore((s) => s.openTool);
-  const filter = useStore((s) => s.activityFilter);
-  const setFilter = useStore((s) => s.setActivityFilter);
   const additions = git.files.reduce((a, f) => a + f.additions, 0);
   const deletions = git.files.reduce((a, f) => a + f.deletions, 0);
-  const commands = session.messages.flatMap((m) => (m.kind === 'assistant' ? m.turn.blocks : [])).filter((b) => b.type === 'group').length * 3;
-
-  const log = [
-    { kind: 'commands', icon: <SquareTerminal size={15} />, color: 'var(--cmd)', text: 'npm run build', at: '2m' },
-    { kind: 'files', icon: <FileIcon size={15} />, color: 'var(--success)', text: 'Edited src/routes/cli.tsx (+36 −0)', at: '2m' },
-    { kind: 'browser', icon: <Globe size={15} />, color: 'var(--info)', text: 'Opened localhost:5173/cli', at: '3m' },
-    { kind: 'git', icon: <GitBranch size={15} />, color: 'var(--success)', text: 'git status --short', at: '4m' },
-    { kind: 'permissions', icon: <Sparkles size={15} />, color: 'var(--warning)', text: 'Allowed once: npm install', at: '9m' },
-  ];
-  const filters = [
-    ['all', 'All'],
-    ['commands', 'Commands'],
-    ['files', 'Files'],
-    ['browser', 'Browser'],
-    ['mcp', 'MCP'],
-    ['git', 'Git'],
-    ['permissions', 'Permissions'],
-  ];
+  const messages = session?.messages ?? [];
+  const actions = messages
+    .filter((m) => m.kind === 'assistant')
+    .flatMap((m) => (m.kind === 'assistant' ? m.turn.blocks : []))
+    .flatMap((b) => (b.type === 'group' ? b.group.actions : []));
+  const checkpoints = messages
+    .filter((m) => m.kind === 'assistant' && m.turn.checkpoint)
+    .map((m) => (m.kind === 'assistant' ? m.turn : null))
+    .filter((turn): turn is NonNullable<typeof turn> => Boolean(turn));
 
   return (
     <div className="h-full overflow-y-auto overflow-x-hidden p-4">
       <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
-          <h2 className="text-[20px] font-semibold truncate" dir="auto">{session.title}</h2>
+          <h2 className="text-[20px] font-semibold truncate" dir="auto">{session?.title ?? t('overview.noSession')}</h2>
           <div className="mt-1.5 flex items-center gap-2">
-            {session.status === 'running' ? (
-              <Badge tone="accent" dot>Running 04:12</Badge>
-            ) : session.status === 'waiting' ? (
-              <Badge tone="warning" dot>Waiting for permission</Badge>
-            ) : session.status === 'error' ? (
-              <Badge tone="danger" dot>Error</Badge>
+            {session?.status === 'running' ? (
+              <Badge tone="accent" dot>{t('overview.running')}</Badge>
+            ) : session?.status === 'waiting' ? (
+              <Badge tone="warning" dot>{t('overview.waiting')}</Badge>
+            ) : session?.status === 'error' ? (
+              <Badge tone="danger" dot>{t('overview.error')}</Badge>
             ) : (
-              <Badge tone="accent"><Check size={12} /> Done</Badge>
+              <Badge tone="accent"><Check size={12} /> {t('overview.idle')}</Badge>
             )}
-            <span className="text-[12.5px] text-[var(--faint)]">VEXORA Complete</span>
+            {session?.project ? <span className="text-[12.5px] text-[var(--faint)]" dir="auto">{session.project}</span> : null}
           </div>
         </div>
-        <Menu trigger={<IBtn label="More"><MoreHorizontal size={18} /></IBtn>} width={200}>
-          <MenuItem>Rename</MenuItem>
-          <MenuItem>Duplicate</MenuItem>
-          <MenuItem>Export transcript</MenuItem>
-          <MenuItem>Archive</MenuItem>
-        </Menu>
       </div>
 
-      <div className="card mt-4 p-4">
-        <div className="flex items-center justify-between">
-          <SectionTitle icon={<LayoutList size={18} />} title={t('overview.currentTask')} />
-          <button type="button" className="text-[13.5px] text-[var(--accent)]" onClick={() => openTool('plan')}>
-            {t('overview.openPlan')}
-          </button>
-        </div>
-        <p className="text-[15px] text-[var(--muted)] mt-2 leading-relaxed">
-          Add the typing animation to the CLI route, keep the chat route intact, and verify the production build.
-        </p>
-        <div className="mt-3"><Progress value={62} /></div>
-        <div className="mt-3 flex flex-col gap-2">
-          {[
-            ['done', 'Inspect both routes'],
-            ['done', 'Add the typing stream to /cli'],
-            ['current', 'Verify the production build'],
-          ].map(([state, label]) => (
-            <div key={label} className="flex items-center gap-2.5 text-[14px]">
-              {state === 'done' ? <CheckCircle2 size={16} className="text-[var(--success)]" /> : <span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent)' }} />}
-              <span className={state === 'current' ? 'shimmer' : undefined}>{label}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 mt-3">
+      <div className="grid grid-cols-2 gap-3 mt-4">
         {[
           { label: t('overview.filesChanged'), value: `${git.files.length}`, sub: `+${additions} −${deletions}`, onClick: () => openTool('changes') },
-          { label: t('overview.commandsRun'), value: `${commands}`, sub: '3 running', onClick: () => openTool('terminal') },
-          { label: t('overview.context'), value: `${usage.context}%`, sub: `${usage.tokens}k tokens`, onClick: () => {} },
-          { label: t('overview.cost'), value: `$${usage.cost.toFixed(2)}`, sub: 'this session', onClick: () => {} },
+          { label: t('overview.commandsRun'), value: `${actions.filter((a) => a.kind === 'cmd').length}`, sub: t('overview.fromThisChat'), onClick: () => openTool('terminal') },
+          { label: t('overview.context'), value: `${usage.context}%`, sub: t('overview.tokens', { n: String(usage.tokens) }), onClick: () => {} },
+          { label: t('overview.cost'), value: `$${usage.cost.toFixed(2)}`, sub: t('overview.thisSession'), onClick: () => {} },
         ].map((c) => (
           <button key={c.label} type="button" onClick={c.onClick} className="card p-3 text-start">
             <div className="text-[13px] text-[var(--muted)]">{c.label}</div>
@@ -693,70 +642,54 @@ function OverviewPanel() {
         ))}
       </div>
 
+      {!messages.length ? (
+        <div className="card mt-4 p-5 text-center">
+          <ListTree size={22} className="mx-auto text-[var(--faint)]" />
+          <div className="text-[15.5px] font-semibold mt-2">{t('overview.emptyTitle')}</div>
+          <p className="text-[13.5px] text-[var(--muted)] mt-1">{t('overview.emptyBody')}</p>
+        </div>
+      ) : (
+        <div className="mt-5">
+          <SectionTitle icon={<History size={18} />} title={t('overview.activityLog')} />
+          <div className="card mt-2 divide-y divide-[var(--line)]">
+            {actions.length ? (
+              actions.map((a) => (
+                <div key={a.id} className="flex items-center gap-2.5 px-3 py-2.5 text-[13.5px]">
+                  <SquareTerminal size={15} style={{ color: 'var(--cmd)' }} />
+                  <span className="text-[var(--muted)]">{a.label}</span>
+                  <span className="flex-1 truncate font-mono text-[12px]" dir="ltr">{a.value}</span>
+                  <span className="text-[11px] text-[var(--faint)]">{a.status}</span>
+                </div>
+              ))
+            ) : (
+              <div className="px-3 py-4 text-[13.5px] text-[var(--muted)]">{t('overview.noActivity')}</div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="mt-5">
         <SectionTitle icon={<History size={18} />} title={t('overview.checkpoints')} />
-        <div className="mt-3 relative ps-4">
-          <div className="absolute start-[5px] top-2 bottom-2 w-px" style={{ background: 'var(--line-strong)' }} />
-          {[
-            { time: '14:22', text: 'Add typing animation to /cli', diff: '+44 −6', current: true },
-            { time: '14:05', text: 'Rebuild the multi-page routes', diff: '+214 −38' },
-            { time: '13:51', text: 'Initial inspection', diff: '+0 −0' },
-          ].map((c) => (
-            <div key={c.time} className="relative pb-4">
-              <span
-                className="absolute -start-4 top-1 w-[11px] h-[11px] rounded-full"
-                style={{ background: c.current ? 'var(--accent)' : 'var(--panel)', border: `2px solid ${c.current ? 'var(--accent)' : 'var(--line-strong)'}` }}
-              />
-              <div className="flex items-center gap-2">
-                <span className="text-[12px] text-[var(--faint)]">{c.time}</span>
-                <span className="text-[14px] flex-1 truncate" dir="auto">{c.text}</span>
-                <span className="text-[12px] font-mono text-[var(--success)]">{c.diff}</span>
-                <Btn size="sm" variant="outline" onClick={() => useStore.getState().toast('Restored checkpoint', 'Undo')}>{t('chat.restore')}</Btn>
+        {checkpoints.length ? (
+          <div className="mt-3 relative ps-4">
+            <div className="absolute start-[5px] top-2 bottom-2 w-px" style={{ background: 'var(--line-strong)' }} />
+            {checkpoints.map((c) => (
+              <div key={c.id} className="relative pb-4">
+                <span
+                  className="absolute -start-4 top-1 w-[11px] h-[11px] rounded-full"
+                  style={{ background: 'var(--accent)', border: '2px solid var(--accent)' }}
+                />
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] text-[var(--faint)]">{new Date(c.startedAt).toLocaleTimeString()}</span>
+                  <span className="text-[14px] flex-1 truncate" dir="auto">{c.checkpoint?.label}</span>
+                  <span className="text-[12px] font-mono text-[var(--muted)]">{c.checkpoint?.files} files</span>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-4">
-        <div className="flex items-center justify-between">
-          <SectionTitle icon={<ListTree size={18} />} title={t('overview.activityLog')} />
-          <Btn size="sm" variant="ghost" onClick={() => useStore.getState().toast('Activity log exported')}>{t('overview.exportJson')}</Btn>
-        </div>
-        <div className="flex gap-1.5 overflow-x-auto no-bar mt-2">
-          {filters.map(([id, label]) => (
-            <Chip key={id} active={filter === id} onClick={() => setFilter(id)} className="h-7 text-[12.5px]">{label}</Chip>
-          ))}
-        </div>
-        <div className="card mt-2 divide-y divide-[var(--line)]">
-          {log.filter((l) => filter === 'all' || l.kind === filter).map((l, i) => (
-            <div key={i} className="flex items-center gap-2.5 px-3 py-2.5 text-[13.5px]">
-              <span style={{ color: l.color }}>{l.icon}</span>
-              <span className="flex-1 truncate">{l.text}</span>
-              <span className="text-[var(--faint)]">{l.at}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-5">
-        <SectionTitle icon={<Sparkles size={18} />} title={t('overview.quickActions')} />
-        <div className="flex gap-2 mt-2 overflow-x-auto no-bar pb-1">
-          {['Preview', 'Run tests', 'Commit', 'Create PR'].map((a) => (
-            <Btn key={a} size="sm" variant="outline" onClick={() => useStore.getState().toast(`${a} started`)}>{a}</Btn>
-          ))}
-        </div>
-      </div>
-
-      <div className="card mt-5 p-3.5">
-        <div className="flex items-center gap-2 text-[14px] font-semibold">AGENTS.md</div>
-        <pre className="mt-2 text-[12.5px] leading-relaxed text-[var(--muted)] whitespace-pre-wrap" dir="ltr">{`# Project rules
-Use bun for installs, never npm.
-Keep components under src/components.`}</pre>
-        <div className="flex items-center justify-between mt-2.5">
-          <span className="text-[12.5px] text-[var(--muted)]">Agent reads this file automatically</span>
-          <Chip className="h-7 text-[12.5px]" active>On</Chip>
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="card mt-2 px-3 py-4 text-[13.5px] text-[var(--muted)]">{t('overview.noCheckpoints')}</div>
+        )}
       </div>
     </div>
   );
@@ -990,7 +923,7 @@ function ChangesPanel() {
               <button
                 type="button"
                 aria-label="Generate commit message"
-                onClick={() => setMsg('Add typing animation to the CLI route')}
+                onClick={() => useStore.getState().toast(t('changes.generateUnavailable'))}
                 className="absolute top-2 end-2 text-[var(--muted)] hover:text-[var(--accent)]"
               >
                 <Sparkles size={17} />
@@ -1059,65 +992,16 @@ function ChangesPanel() {
 }
 
 /* ================================ plan ================================ */
-const PLAN_STEPS = [
-  { title: 'Read the current routes', status: 'done', files: ['src/routes/chat.tsx', 'src/routes/cli.tsx'], risk: 'low', desc: 'Understand how the chat and CLI pages are mounted.' },
-  { title: 'Add a multi-page Vite config', status: 'done', files: ['vite.config.ts'], risk: 'low', desc: 'Two HTML entries with shared chunks.' },
-  { title: 'Build the CLI typing stream', status: 'running', files: ['src/routes/cli.tsx'], risk: 'medium', desc: 'Stream characters every 24ms and keep the caret at the end.' },
-  { title: 'Style the terminal output', status: 'pending', files: ['src/styles.css'], risk: 'low', desc: 'Monospace, soft contrast, wrapping.' },
-  { title: 'Verify the production build', status: 'pending', files: ['package.json'], risk: 'low', desc: 'Run the build and the type check.' },
-  { title: 'Screenshot both routes', status: 'pending', files: ['src/routes/chat.tsx'], risk: 'low', desc: 'Check 390×844 and desktop.' },
-];
 
 function PlanPanel() {
   const { t } = useI18n();
   const setMode = useStore((s) => s.setSessionMode);
-  const send = useStore((s) => s.send);
-  const toast = useStore((s) => s.toast);
   return (
-    <div className="h-full overflow-y-auto overflow-x-hidden p-4">
-      <div className="flex items-center gap-2">
-        <h2 className="text-[20px] font-semibold flex-1">Multi-page build plan</h2>
-        <Badge tone="warning">Draft</Badge>
-      </div>
-      <div className="flex items-center gap-2 mt-1.5 text-[12.5px] text-[var(--muted)]">
-        <span>{t('plan.steps', { n: PLAN_STEPS.length })}</span>
-        <span>·</span>
-        <span>{t('plan.estimated', { n: 12 })}</span>
-      </div>
-      <div className="mt-3"><Progress value={34} /></div>
-
-      <div className="mt-4 flex flex-col gap-2">
-        {PLAN_STEPS.map((s, i) => (
-          <div key={s.title} className="card p-3">
-            <div className="flex items-start gap-2.5">
-              <span className="mt-0.5 flex-none">
-                {s.status === 'done' ? <CheckCircle2 size={18} className="text-[var(--success)]" /> : s.status === 'running' ? <Loader2 size={18} className="animate-spin text-[var(--accent)]" /> : <Circle size={18} className="text-[var(--faint)]" />}
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className={clsx('text-[15px] font-medium', s.status === 'running' && 'shimmer')} dir="auto">
-                  {i + 1}. {s.title}
-                </div>
-                <p className="text-[13px] text-[var(--muted)] mt-1 leading-snug">{s.desc}</p>
-                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                  {s.files.map((f) => (
-                    <code key={f} className="code-chip">{f}</code>
-                  ))}
-                  <Badge tone={s.risk === 'medium' ? 'warning' : 'neutral'}>{s.risk} risk</Badge>
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
-        <button type="button" className="rounded-2xl py-3 text-[14px] text-[var(--muted)] hover:text-[var(--text)]" style={{ border: '1.5px dashed var(--line-strong)' }} onClick={() => toast('Step added')}>
-          + Add step
-        </button>
-      </div>
-
-      <div className="flex flex-wrap gap-2 mt-4">
-        <Btn variant="primary" onClick={() => { setMode('build'); send('Approve the plan and build it'); }}>{t('plan.approve')}</Btn>
-        <Btn variant="outline" onClick={() => setMode('build')}>{t('plan.editChat')}</Btn>
-        <Btn variant="ghost" onClick={() => toast('Plan discarded')}>{t('plan.discard')}</Btn>
-      </div>
+    <div className="h-full overflow-y-auto p-6 flex flex-col items-center justify-center text-center">
+      <ListTree size={24} className="text-[var(--faint)]" />
+      <div className="text-[16px] font-semibold mt-2">{t('plan.emptyTitle')}</div>
+      <p className="text-[13.5px] text-[var(--muted)] mt-1 max-w-[320px]">{t('plan.emptyBody')}</p>
+      <Btn className="mt-4" variant="outline" onClick={() => setMode('plan')}>{t('plan.switchToPlan')}</Btn>
     </div>
   );
 }

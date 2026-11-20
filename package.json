@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "test:visual": "playwright test"
+    "test:visual": "playwright test",
+    "serve:dist": "node scripts/serve-dist.mjs",
+    "check:bundle": "node scripts/check-bundle.mjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "clsx": "^2.1.1",

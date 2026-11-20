@@ -658,11 +658,10 @@ function SkillsTab() {
 function ProjectTab() {
   const { t } = useI18n();
   const toast = useStore((s) => s.toast);
-  const [script, setScript] = useState('bun install\nbun run dev');
-  const [secrets, setSecrets] = useState([
-    { name: 'GHToken', value: 'ghp_2f9a7c4e1b', shown: false },
-    { name: 'OPENAI_API_KEY', value: 'sk-live-9f2b', shown: false },
-  ]);
+  const [script, setScript] = useState('npm install\nnpm run dev');
+  const sessions = useStore((s) => s.sessions);
+  const projects = Array.from(new Set(sessions.map((x) => x.project).filter(Boolean)));
+  const [secrets, setSecrets] = useState<{ name: string; value: string; shown: boolean }[]>([]);
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
@@ -676,14 +675,17 @@ function ProjectTab() {
         trigger={
           <button type="button" className="chip h-9 gap-2 mb-4">
             <FolderCog size={16} />
-            VEXORA Complete
+            {projects[0] ?? t('drawer.noProject')}
             <ChevronDown size={13} />
           </button>
         }
       >
-        <MenuItem>VEXORA Complete</MenuItem>
-        <MenuItem>Design System Extractor</MenuItem>
-        <MenuItem icon={<Plus size={14} />}>New project…</MenuItem>
+        {projects.length ? (
+          projects.map((p) => <MenuItem key={p}>{p}</MenuItem>)
+        ) : (
+          <MenuItem>{t('drawer.noProjects')}</MenuItem>
+        )}
+        <MenuItem icon={<Plus size={14} />}>{t('drawer.newProject')}</MenuItem>
       </Menu>
 
       <SectionTitle icon={<TerminalSquare size={18} />} title={t('settings.startupScript')} help={t('settings.startupHint')} />
@@ -756,10 +758,17 @@ function ProjectTab() {
       <div className="mt-6">
         <SectionTitle icon={<Code2 size={18} />} title={t('settings.instructions')} />
         <div className="card p-4 mt-2">
-          <textarea className="area font-mono text-[13.5px]" rows={6} defaultValue={'# Project overview\nVEXORA is a Vite + React multi-page site.\n\n## Commands\n- bun run dev\n- bun run build'} style={{ fontFamily: 'var(--font-mono)' }} dir="ltr" />
+          <textarea
+            className="area font-mono text-[13.5px]"
+            rows={6}
+            defaultValue=""
+            placeholder={t('settings.instructionsPlaceholder')}
+            style={{ fontFamily: 'var(--font-mono)' }}
+            dir="ltr"
+          />
           <div className="flex items-center justify-between mt-2">
-            <span className="text-[12.5px] text-[var(--faint)]">Last read by the agent: 2m ago</span>
-            <Btn size="sm" variant="outline" onClick={() => toast('Template inserted')}>Insert template</Btn>
+            <span className="text-[12.5px] text-[var(--faint)]">{t('settings.instructionsNotRead')}</span>
+            <Btn size="sm" variant="outline" onClick={() => toast(t('settings.instructionsTemplate'))}>{t('settings.insertTemplate')}</Btn>
           </div>
         </div>
       </div>
@@ -826,20 +835,22 @@ function KeyboardTab() {
 function AccountTab() {
   const { t } = useI18n();
   const toast = useStore((s) => s.toast);
-  const [name, setName] = useState('Mohammed Hamra');
+  const [name, setName] = useState('');
   return (
     <div className="max-w-[720px]">
       <PageTitle>{t('settings.account')}</PageTitle>
       <div className="card p-4 flex items-center gap-3">
-        <div className="w-12 h-12 rounded-xl grid place-items-center text-[20px] font-bold" style={{ background: 'var(--accent)', color: 'var(--accent-ink)' }}>M</div>
+        <div className="w-12 h-12 rounded-xl grid place-items-center text-[20px] font-bold" style={{ background: 'var(--elevated)', color: 'var(--muted)' }}>
+          {name.trim() ? name.trim().slice(0, 1).toUpperCase() : '?'}
+        </div>
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-[17px] font-semibold">{name}</span>
-            <Badge tone="accent">{t('settings.verified')}</Badge>
+            <span className="text-[17px] font-semibold">{name.trim() || t('account.guest')}</span>
+            <Badge tone="info">{t('account.localProfile')}</Badge>
           </div>
-          <div className="text-[13.5px] text-[var(--muted)]">mohammed@example.com</div>
+          <div className="text-[13.5px] text-[var(--muted)]">{t('account.guestHint')}</div>
         </div>
-        <Btn variant="outline" size="sm" onClick={() => toast('Profile saved')}>{t('common.save')}</Btn>
+        <Btn variant="outline" size="sm" onClick={() => toast(t('account.savedLocally'))}>{t('common.save')}</Btn>
       </div>
 
       <div className="mt-5">

@@ -9,9 +9,9 @@ import type {
   SiteTemplate,
   Skill,
   UsageReport,
-} from './types';
+} from '../types';
 
-export const uid = () => Math.random().toString(36).slice(2, 10);
+export { uid } from '../ids';
 
 /* ------------------------------ files ------------------------------ */
 const f = (path: string, status: FileNode['status'] = null): FileNode => ({

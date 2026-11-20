@@ -117,7 +117,7 @@ export function TopBar() {
                 />
               ) : (
                 <span className="flex-1 truncate" dir="auto">
-                  {s.title}
+                  {s.title === 'New chat' ? t('tab.newChat') : s.title}
                 </span>
               )}
               <span
@@ -169,6 +169,7 @@ export function Rail() {
   const { t } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
+  const streak = useStore((s) => s.usage.streak);
   const setDrawer = useStore((s) => s.setDrawer);
   const setTheme = useStore((s) => s.setTheme);
   const themeId = useStore((s) => s.themeId);
@@ -226,7 +227,7 @@ export function Rail() {
               {t('share.whatsNew')}
             </MenuItem>
             <div className="flex items-center gap-2 mt-2 px-1 text-[13.5px] text-[var(--muted)]">
-              <Flame size={15} /> <span>{t('drawer.streak', { n: 7 })}</span>
+              <Flame size={15} /> <span>{t('drawer.streak', { n: streak.current })}</span>
             </div>
           </div>
         </Menu>
@@ -263,15 +264,15 @@ export function Rail() {
                 boxShadow: '0 2px 0 var(--edge)',
               }}
             >
-              M
+              <UserCircle size={19} />
             </button>
           }
         >
           <MenuItem icon={<UserCircle size={16} />} onClick={() => navigate('/settings/account')}>
-            Account
+            {t('settings.account')}
           </MenuItem>
           <MenuItem icon={<Hourglass size={16} />} onClick={() => navigate('/settings/usage')}>
-            Usage
+            {t('settings.usage')}
           </MenuItem>
           <MenuItem icon={<Palette size={16} />} onClick={() => navigate('/settings/appearance')}>
             Theme
@@ -308,7 +309,7 @@ export function Rail() {
             </div>
           </div>
           <MenuItem icon={<LogOut size={16} />} danger>
-            Sign out
+            {t('account.signOut')}
           </MenuItem>
         </Menu>
       </div>
@@ -322,6 +323,8 @@ export function Drawer() {
   const drawerOpen = useStore((s) => s.drawerOpen);
   const setDrawer = useStore((s) => s.setDrawer);
   const sessions = useStore((s) => s.sessions);
+  const projects = Array.from(new Set(sessions.map((s) => s.project).filter(Boolean)));
+  const streak = useStore((s) => s.usage.streak);
   const activeId = useStore((s) => s.activeSessionId);
   const setActive = useStore((s) => s.setActiveSession);
   const newSession = useStore((s) => s.newSession);
@@ -384,16 +387,16 @@ export function Drawer() {
           </div>
           {projectsOpen ? (
             <div className="mt-1.5">
-              <div className="group flex items-center gap-2 h-10 px-2 rounded-[9px] hover:bg-[var(--hover)]">
-                <Folder size={19} className="text-[var(--muted)]" />
-                <span className="text-[15.5px] flex-1 truncate" dir="auto">VEXORA Complete</span>
-                <button type="button" aria-label="Project menu" className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-[var(--muted)]">
-                  <span className="text-[16px] leading-none">…</span>
-                </button>
-                <button type="button" aria-label="Rename project" className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-[var(--muted)]">
-                  <SquarePen size={15} />
-                </button>
-              </div>
+              {projects.length ? (
+                projects.map((p) => (
+                  <div key={p} className="group flex items-center gap-2 h-10 px-2 rounded-[9px] hover:bg-[var(--hover)]">
+                    <Folder size={19} className="text-[var(--muted)]" />
+                    <span className="text-[15.5px] flex-1 truncate" dir="auto">{p}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="px-2 py-2 text-[13.5px] text-[var(--muted)]">{t('drawer.noProjects')}</div>
+              )}
             </div>
           ) : null}
         </div>
@@ -412,13 +415,11 @@ export function Drawer() {
                 style={{ background: s.id === activeId ? 'var(--elevated)' : undefined }}
               >
                 <span className="w-1.5 h-1.5 rounded-full flex-none" style={{ background: s.status === 'running' ? 'var(--accent)' : 'transparent' }} />
-                <span className="truncate flex-1">{s.title}</span>
+                <span className="truncate flex-1">{s.title === 'New chat' ? t('tab.newChat') : s.title}</span>
                 <span className="text-[12px] text-[var(--faint)] flex-none">2m</span>
               </button>
             ))}
           </div>
-          <div className="text-[11.5px] uppercase tracking-wide text-[var(--faint)] mt-3 mb-1">{t('drawer.yesterday')}</div>
-          <div className="text-[14.5px] text-[var(--muted)] px-2 py-1.5" dir="auto">Design System Extractor</div>
         </div>
 
         <div className="border-t border-[var(--line)] px-4 py-3 flex flex-col gap-2.5">
@@ -432,13 +433,13 @@ export function Drawer() {
           </button>
           <div className="flex items-center gap-2 text-[15px]">
             <Flame size={18} style={{ color: 'var(--cmd)' }} />
-            <span>{t('drawer.streak', { n: 7 })}</span>
+            <span>{t('drawer.streak', { n: streak.current })}</span>
             <span className="ms-auto flex gap-1">
               {Array.from({ length: 7 }).map((_, i) => (
                 <span
                   key={i}
                   className="w-[14px] h-[14px] rounded-[3px]"
-                  style={{ background: i < 6 ? 'var(--accent)' : 'color-mix(in srgb, var(--elevated) 80%, transparent)' }}
+                  style={{ background: i < streak.active ? 'var(--accent)' : 'color-mix(in srgb, var(--elevated) 80%, transparent)' }}
                 />
               ))}
             </span>

@@ -20,19 +20,10 @@ import type {
   ToolTabKind,
   UsageReport,
 } from './lib/types';
-import {
-  BRANCHES,
-  COMMITS,
-  FILE_CONTENTS,
-  FILE_TREE,
-  GIT_FILES,
-  INTEGRATIONS,
-  MCP_SERVERS,
-  SKILLS,
-  USAGE,
-  seedSessions,
-  uid,
-} from './lib/mock';
+import type { ScenarioStep } from './lib/mock/scenario';
+import { uid } from './lib/ids';
+import { EMPTY_GIT, EMPTY_USAGE } from './lib/empty';
+import { INTEGRATION_CATALOG } from './lib/integrations';
 import type { Lang } from './lib/i18n';
 import { runLiveTurn, type AskRequest } from './lib/agentClient.local';
 import { NoWorkingModelError } from './lib/modelProbe';
@@ -56,14 +47,6 @@ export interface Settings {
   reduceMotion: boolean;
   accent: string;
 }
-
-type ScenarioStep =
-  | { k: 'text'; text: string }
-  | { k: 'group'; actions: [ToolKind, string, string][] }
-  | { k: 'permission'; action: string; command: string; risk: 'low' | 'medium' | 'high' }
-  | { k: 'error'; title: string; message: string; details: string }
-  | { k: 'checkpoint' }
-  | { k: 'final'; text: string; followUps: string[] };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
@@ -184,8 +167,20 @@ interface AppStore {
   setActivityFilter: (v: string) => void;
 }
 
-const seedSessionsList = seedSessions();
-const initialFiles = FILE_TREE;
+const newChatSession = (): Session => ({
+  id: uid(),
+  title: 'New chat',
+  project: '',
+  status: 'idle',
+  mode: 'build',
+  draft: '',
+  model: '',
+  effort: 'high',
+  updatedAt: Date.now(),
+  messages: [],
+});
+
+const initialSession = newChatSession();
 
 export const useStore = create<AppStore>((set, get) => ({
   themeId: localStorage.getItem('fc.theme') || 'dark',
@@ -221,17 +216,23 @@ export const useStore = create<AppStore>((set, get) => ({
       sessions: payload.sessions?.length ? payload.sessions : s.sessions,
       activeSessionId: payload.sessions?.length ? payload.sessions[0].id : s.activeSessionId,
     })),
-  resetSettings: () =>
+  resetSettings: () => {
+    const fresh = newChatSession();
     set({
       themeId: 'dark',
-      sessions: seedSessions(),
-      activeSessionId: 's1',
-      files: FILE_TREE,
-      git: { branch: 'main', ahead: 2, behind: 0, files: GIT_FILES, commits: COMMITS, branches: BRANCHES },
-      integrations: INTEGRATIONS,
-      skills: SKILLS,
-      mcp: MCP_SERVERS,
-    }),
+      sessions: [fresh],
+      activeSessionId: fresh.id,
+      files: [],
+      fileContents: {},
+      openFilePath: null,
+      git: EMPTY_GIT,
+      integrations: INTEGRATION_CATALOG,
+      skills: [],
+      mcp: [],
+      usage: EMPTY_USAGE,
+      sessionUsage: { context: 0, cost: 0, tokens: 0 },
+    });
+  },
 
   mode: 'code',
   setMode: (mode) => set({ mode }),
@@ -242,45 +243,18 @@ export const useStore = create<AppStore>((set, get) => ({
   paletteOpen: false,
   setPalette: (paletteOpen) => set({ paletteOpen }),
 
-  sessions: seedSessionsList,
-  activeSessionId: seedSessionsList[0].id,
+  sessions: [initialSession],
+  activeSessionId: initialSession.id,
   setActiveSession: (id) => set({ activeSessionId: id, drawerOpen: false }),
   newSession: () => {
-    const id = uid();
-    const s: Session = {
-      id,
-      title: 'New chat',
-      project: 'VEXORA Complete',
-      status: 'idle',
-      mode: 'build',
-      draft: '',
-      model: 'DeepSeek V4.1 Flash',
-      effort: 'high',
-      updatedAt: Date.now(),
-      messages: [],
-    };
-    set((st) => ({ sessions: [...st.sessions, s], activeSessionId: id, drawerOpen: false, toolOpen: false }));
-    return id;
+    const s = newChatSession();
+    set((st) => ({ sessions: [...st.sessions, s], activeSessionId: s.id, drawerOpen: false, toolOpen: false }));
+    return s.id;
   },
   closeSession: (id) =>
     set((st) => {
       const rest = st.sessions.filter((s) => s.id !== id);
-      const sessions = rest.length
-        ? rest
-        : [
-            {
-              id: uid(),
-              title: 'New chat',
-              project: 'VEXORA Complete',
-              status: 'idle' as const,
-              mode: 'build' as const,
-              draft: '',
-              model: 'DeepSeek V4.1 Flash',
-              effort: 'high' as const,
-              updatedAt: Date.now(),
-              messages: [],
-            },
-          ];
+      const sessions = rest.length ? rest : [newChatSession()];
       return {
         sessions,
         activeSessionId: st.activeSessionId === id ? sessions[sessions.length - 1].id : st.activeSessionId,
@@ -354,6 +328,8 @@ export const useStore = create<AppStore>((set, get) => ({
         await runLive(sid, turnId, text, mode, session.model, token, set, get);
         return;
       }
+      if (token !== runToken) return;
+      const { buildScenario } = await import('./lib/mock/scenario');
       if (token !== runToken) return;
       void runScenario(sid, turnId, buildScenario(text, mode, get().lang), token, set, get);
     })();
@@ -454,8 +430,8 @@ export const useStore = create<AppStore>((set, get) => ({
   dockHeight: 35,
   setDockHeight: (dockHeight) => set({ dockHeight }),
 
-  files: initialFiles,
-  fileContents: FILE_CONTENTS,
+  files: [],
+  fileContents: {},
   openFilePath: null,
   openFile: (path) => {
     set({ openFilePath: path });
@@ -474,7 +450,7 @@ export const useStore = create<AppStore>((set, get) => ({
       return { fileContents: { ...s.fileContents, [path]: content }, files: walk(s.files) };
     }),
 
-  git: { branch: 'main', ahead: 2, behind: 0, files: GIT_FILES, commits: COMMITS, branches: BRANCHES },
+  git: EMPTY_GIT,
   toggleStage: (path) =>
     set((s) => ({
       git: { ...s.git, files: s.git.files.map((f) => (f.path === path ? { ...f, staged: !f.staged } : f)) },
@@ -527,7 +503,7 @@ export const useStore = create<AppStore>((set, get) => ({
       },
     })),
 
-  integrations: INTEGRATIONS,
+  integrations: INTEGRATION_CATALOG,
   connectIntegration: (id, account) =>
     set((s) => ({
       integrations: s.integrations.map((i) =>
@@ -555,11 +531,11 @@ export const useStore = create<AppStore>((set, get) => ({
           : i,
       ),
     })),
-  skills: SKILLS,
+  skills: [],
   toggleSkill: (id) => set((s) => ({ skills: s.skills.map((k) => (k.id === id ? { ...k, enabled: !k.enabled } : k)) })),
   addSkill: (name, description) =>
     set((s) => ({ skills: [{ id: name, name, description, enabled: true, scope: 'project', used: 0 }, ...s.skills] })),
-  mcp: MCP_SERVERS,
+  mcp: [],
   toggleMcp: (id) =>
     set((s) => ({
       mcp: s.mcp.map((m) => (m.id === id ? { ...m, status: m.status === 'disabled' ? 'connected' : 'disabled' } : m)),
@@ -573,8 +549,8 @@ export const useStore = create<AppStore>((set, get) => ({
       ),
     })),
 
-  usage: USAGE,
-  sessionUsage: { context: 61, cost: 0.42, tokens: 124 },
+  usage: EMPTY_USAGE,
+  sessionUsage: { context: 0, cost: 0, tokens: 0 },
   toasts: [],
   toast: (text, action, onAction) => {
     const id = uid();
@@ -587,99 +563,6 @@ export const useStore = create<AppStore>((set, get) => ({
   activityFilter: 'all',
   setActivityFilter: (activityFilter) => set({ activityFilter }),
 }));
-
-/* ------------------------- scenario engine ------------------------- */
-
-function buildScenario(text: string, mode: Mode, lang: Lang): ScenarioStep[] {
-  const ar = lang === 'ar';
-  const lower = text.toLowerCase();
-  const risky = /rm -rf|--force|force push|permission|delete/.test(lower);
-  const failing = /error|fails|failing|stack|bug/.test(lower);
-
-  if (risky) {
-    return [
-      { k: 'text', text: ar ? 'سأفحص الحالة أولاً. هذا الأمر يحتاج إذنك قبل التشغيل.' : 'Let me inspect the state first. This command needs your approval before it runs.' },
-      { k: 'group', actions: [['read', 'Read', 'package.json'], ['cmd', 'Ran', 'git status --short']] },
-      {
-        k: 'permission',
-        action: ar ? 'حذف node_modules وإعادة تثبيت الحزم' : 'Delete node_modules and reinstall dependencies',
-        command: 'rm -rf node_modules && npm install',
-        risk: 'medium',
-      },
-      { k: 'group', actions: [['cmd', 'Ran', 'npm install'], ['cmd', 'Ran', 'npm run build']] },
-      {
-        k: 'final',
-        text: ar
-          ? 'تمت إعادة تثبيت الحزم والبناء يمر بنجاح. لم ألمس أي ملف مصدري.'
-          : 'Dependencies are reinstalled and the build passes. I did not touch any source file.',
-        followUps: ar ? ['شغّل الاختبارات', 'اعرض الفروقات', 'أنشئ commit'] : ['Run the tests', 'Show the diff', 'Create a commit'],
-      },
-    ];
-  }
-
-  if (failing) {
-    return [
-      { k: 'group', actions: [['read', 'Read', 'src/routes/chat.tsx'], ['cmd', 'Ran', 'npm run build']] },
-      {
-        k: 'error',
-        title: ar ? 'فشل البناء' : 'Build failed',
-        message: ar ? 'خطأ نوعي في src/routes/chat.tsx عند السطر 18.' : 'A type error in src/routes/chat.tsx at line 18.',
-        details:
-          'src/routes/chat.tsx:18:24 - error TS2339: Property "reply" does not exist on type "Message".\n\n18     setMessages((m) => [...m, reply]);\n                                       ~~~~~',
-      },
-    ];
-  }
-
-  if (mode === 'plan') {
-    return [
-      { k: 'text', text: ar ? 'سأضع خطة قبل أي تعديل:' : "Here's a plan before touching anything:" },
-      { k: 'group', actions: [['read', 'Read', 'vite.config.ts'], ['read', 'Read', 'src/routes/cli.tsx'], ['browser', 'Opened', 'localhost:5173/chat']] },
-      {
-        k: 'final',
-        text: ar
-          ? 'الخطة جاهزة في تبويب «الخطة»: ست خطوات، لا تعديلات قبل اعتمادك.'
-          : 'The plan is ready in the Plan tab: six steps, and no edits until you approve it.',
-        followUps: ar ? ['عدّل الخطوة الثانية', 'قدّر الوقت', 'ابدأ البناء'] : ['Edit step 2', 'Estimate the time', 'Start building'],
-      },
-    ];
-  }
-
-  return [
-    { k: 'checkpoint' },
-    { k: 'text', text: ar ? 'سأبدأ بفحص المشروع الحالي.' : "I'll start by inspecting the current project." },
-    {
-      k: 'group',
-      actions: [
-        ['read', 'Read', 'package.json'],
-        ['read', 'Read', 'src/routes/chat.tsx'],
-        ['cmd', 'Ran', 'ls src'],
-      ],
-    },
-    {
-      k: 'text',
-      text: ar
-        ? 'المسارات جاهزة. سأضيف الكتابة التدريجية في `/cli` وأتحقق من البناء.'
-        : "The routes are in place. I'll wire the typing animation into `/cli` and check the build.",
-    },
-    {
-      k: 'group',
-      actions: [
-        ['edit', 'Edited', 'src/routes/cli.tsx'],
-        ['edit', 'Edited', 'src/styles.css'],
-        ['cmd', 'Ran', 'npm run build'],
-      ],
-    },
-    {
-      k: 'final',
-      text: ar
-        ? 'تم. أصبحت `/cli` تطبع المخرجات حرفاً بحرف، و`/chat` يحتفظ بسلوك المحرر نفسه. البناء يمر بنجاح.'
-        : 'Done. `/cli` now streams its output character by character, and `/chat` keeps the same composer behavior. The build passes.',
-      followUps: ar
-        ? ['تحقق من البناء', 'راجع الفروقات', 'أضف اختباراً']
-        : ['Verify the build', 'Review the diff', 'Add a test'],
-    },
-  ];
-}
 
 async function runScenario(
   sid: string,
