@@ -22,6 +22,9 @@ UI (React) ──► store.send ──► lib/agentClient.local.ts ──► eng
 | `src/engine/providers/catalog.ts` | Catalog parsers (`openai`, `openrouter`, `kilo`), staleness, retirement, default-model choice. |
 | `src/engine/providers/capabilities.ts` | Family inference and reported-value precedence. |
 | `src/engine/providers/keys.ts` / `fallback.ts` / `rateLimit.ts` / `errors.ts` | Key pools/cooldowns, fallback decisions (never replay after output), sliding-window counter, typed errors. |
+| `src/engine/providers/lite.ts` | Lite mode: compact request for free providers with tight token limits (no tools, ≤1024 output tokens). |
+| `src/engine/providers/queue.ts` | One in-flight request per provider, shared by `chat` and `refreshCatalog`. |
+| `src/engine/providers/backoff.ts` | Retry-After aware retry policy (default one extra attempt, never after output). |
 | `src/engine/providers/builtin/freeProviders.ts` / `presets.ts` | Keyless free providers and bring-your-own-key presets. Model ids are never hard-coded. |
 | `src/engine/agent/loop.ts` | The run loop: model → tools → permission → results → final. Step limit and repeated-call guard. |
 | `src/engine/agent/prompt.ts` | Ordered system prompt. |
@@ -50,6 +53,8 @@ UI (React) ──► store.send ──► lib/agentClient.local.ts ──► eng
 5. Maps non-2xx responses to `ProviderError` with a code, `Retry-After`, and a hint.
 
 Fallback rules live in `decideFallback`: never retry or switch once output has started; quota/auth/model-not-found switch immediately; rate/server/network/timeout retry first, then switch.
+
+The registry itself serializes requests per provider (`SerialQueue`) and retries rate/server/network/timeout failures once through `withBackoff`, honoring `Retry-After` and refusing to retry after the first delta. Lite mode (`lite.ts`) is applied in `lib/agentClient.local.ts` before the turn starts.
 
 ## Local data
 

@@ -2,6 +2,24 @@
 
 Everything below is what this build actually does and what remains unverified. Do not treat the list as a roadmap promise.
 
+## F1 — free providers: Lite mode + stability (this build)
+
+Verified in this workspace:
+
+- `npx tsc -b` clean; `npx vitest run` **121/121**, including 23 new tests: Lite selection/shaping (`src/engine/providers/__tests__/lite.test.ts`), serial queue + backoff + Retry-After parsing (`queueBackoff.test.ts`), and a fake OpenAI-compatible endpoint (`fakeServer.test.ts`) that streams SSE, counts concurrent requests, returns 429/400/403 and errors mid-stream.
+- Two concurrent turns to one provider reach the endpoint one at a time (max concurrency 1); different providers still run in parallel. A 429 with `Retry-After: 2` is retried once after 2 s; `Retry-After: 120` is reported as a `rate` error without sleeping; 400/403 and a stream that already produced a delta are never retried.
+- Lite mode control on `/settings/providers` (AR/RTL, real Chromium): the `on` choice is written to `fc.lite`, survives a reload, and `crossOriginIsolated` stays `true`. No console output was captured.
+- Ten real keyless requests from this VM (details in `docs/PROGRESS.md`): LLM7 catalog + short chat + agent-sized chat all **200/SSE** with CORS `*`; Kilo catalog + chat **200/SSE** but **without** `Access-Control-Allow-Origin`; OVH catalog plain **200**, `Bearer anonymous` **403**, chat `gpt-oss-20b` **429**, chat `clef-flash` **404 model_not_found**.
+
+Not verified / still missing:
+
+- **No app-level streamed reply was observed today.** The wire-level LLM7 and Kilo responses streamed correctly with curl, but a full turn through the composer after the F1 changes was not run in the browser. Lite mode was also not exercised against a live 429 (LLM7 did not rate-limit today).
+- **Kilo remains unusable in a browser.** The service answers 200 to curl but sends no `Access-Control-Allow-Origin`, so the app keeps reporting it as unreachable/CORS-blocked. Nothing client-side can fix that.
+- **OVH is keyless but rate limited.** The built-in no longer sends `Bearer anonymous` (403). Plain chat works at the transport level but returned `429 API rate limit exceeded` with no `Retry-After` header, so the UI can only show the generic rate error and the short cooldown.
+- **LLM7 catalog now declares paid pricing** for all 89 models (USD per 1M tokens, `tier: pro|turbo`). None is marked `free`, so they stay behind "Show all" until selected or probed. Keyless requests still return 200.
+- **Lite mode is chat-only by design.** The agent loses file/edit tools while it is on; the banner says so. There is no per-turn override control in the composer.
+- **Queue is in-memory only.** Two tabs of the same profile still send independently.
+
 ## F0 — demo data removal (this build)
 
 Verified in this workspace:
@@ -23,10 +41,10 @@ Not verified / still missing:
 - `npx vitest run` passes: **95 tests** covering the SSE parser (fragmented chunks, multi-byte, comments, `[DONE]`, early end), both adapters (text, reasoning, tool-call fragments, object arguments, inline thinking, mid-stream errors), errors/status mapping, sliding-window rate counter, key pool/cooldowns, fallback decisions, catalog parsing/fetch shape, model catalog grouping/defaults, edit application (exact/multiple/fuzzy/indent/trailing newline), write guard, manifest diff, grep, system prompt, agent loop (tool run, permission ask/deny), vault AES-GCM round-trip and passphrase verify, redactor, path safety, the `MemoryFS` ProjectFS contract, EN/AR key parity, popover opacity/contrast and z-index order.
 - `npx vite build` passes (≈143 KB gzip JS); `dist/` contains `_headers` and `_redirects`.
 - **Cloudflare Pages target:** `<project>.pages.dev` serves `dist/`. `public/_headers` sets `cross-origin-opener-policy: same-origin` and `cross-origin-embedder-policy: credentialless`; `public/_redirects` maps `/*  /index.html  200` for SPA deep links; `.node-version` pins Node 20. The build was **not deployed from this workspace** (no deployment is allowed here), so the live headers and `crossOriginIsolated` on Cloudflare are **not yet verified**. Verify after the first deploy with Settings → General → Data → Runtime status or `curl -I`.
-- **Browser model catalogs and providers (production build, local `vite preview`, real Chromium):**
+- **Browser model catalogs and providers (production build, local `vite preview`, real Chromium) — historical, partially superseded by F1 above:**
   - `llm7`: catalog **200 / 86 models**. Tests probe up to three of the provider's own chat models: `gemini-3-flash` → **401 needs key**, `gemini-3.0-pro-image` and `gemini-3.1-flash-image` → **400 no tools**. `gemma-3-27b` probed **400 "does not support tools"** and is marked reply-only. `gpt-oss:20b` probed **200 OK with tools** and became the selected model (`health: ok`).
   - `kilo-free`: catalog fails in the browser (`net::ERR_FAILED`, then `ERR_BLOCKED_BY_RESPONSE.NotSameOrigin`; DevTools reports no `Access-Control-Allow-Origin`). The app labels it "Cannot reach the service from your network" because both the CORS and `no-cors` probes are blocked by the browser; after two failures it starts a 30s cooldown (countdown shown) instead of retrying continuously.
-  - `ovh-anon`: catalog request with `Authorization: Bearer anonymous` returns **403**; a plain GET without that header returns **200**. The app now reports "The service refused anonymous access (403)" with `HTTP 403`, marks the provider unverified and keeps it collapsed under "More free options" with a "Chat only" badge.
+  - `ovh-anon`: catalog request with `Authorization: Bearer anonymous` returns **403**; a plain GET without that header returns **200**. F1 removed the anonymous header from the built-in provider, so this paragraph only describes the old configuration.
 - **Real send path:** a real `مرحبا` message to `gemma-3-27b` streamed through the no-tools path: the app showed the persistent banner "This model has no tools: it only replies…" and produced no fake answer. The provider then answered **HTTP 429** (free token allowance). Repeating with the tools-capable `gpt-oss:20b` also returned **HTTP 429** for the full agent payload (long system prompt + tool schemas), while tiny direct requests to the same model returned **200**. **No successful streamed reply was observed through the app UI**; the provider's free per-minute token allowance was not enough for the agent request. The error card was shown instead of a fake reply.
 
 ## Unverified or not implemented

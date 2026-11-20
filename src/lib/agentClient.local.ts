@@ -5,6 +5,7 @@ import { WriteGuard } from '../engine/agent/tools/edit';
 import { editFileTool, listFilesTool, readFileTool, writeFileTool } from '../engine/agent/tools/fs';
 import { grepFiles } from '../engine/agent/tools/search';
 import { ProviderError } from '../engine/providers/errors';
+import { LITE_MAX_TOKENS, LITE_SYSTEM_PROMPT, shouldUseLite, toLiteRequest } from '../engine/providers/lite';
 import type { ChatMessage, Delta } from '../engine/providers/types';
 import { decode, type ProjectFS } from '../storage/projectFs';
 import { MemoryFS } from '../storage/projectFs/memory';
@@ -13,6 +14,7 @@ import { buildCatalog, findModel, flattenCatalog, pickDefaultModel } from './mod
 import { NoWorkingModelError, recordHealth, resolveWorkingModel } from './modelProbe';
 import { translate, type Lang } from './i18n';
 import { recordRequest } from './requestCounter';
+import { getLiteSetting } from './liteMode';
 
 export interface AskRequest {
   tool: string;
@@ -87,9 +89,13 @@ export async function runLiveTurn(opts: LiveTurnOptions): Promise<{ text: string
     });
   }
   const registry = registryFor(loadProviders());
-  const known = loadProviders().find((p) => p.id === choice.providerId)?.models.find((m) => m.id === choice.modelId);
-  let replyOnly = known?.health === 'no-tools';
-  if (replyOnly) {
+  const provider = loadProviders().find((p) => p.id === choice.providerId);
+  const known = provider?.models.find((m) => m.id === choice.modelId);
+  const lite = provider ? shouldUseLite(getLiteSetting(), provider) : false;
+  let replyOnly = lite || known?.health === 'no-tools';
+  if (lite) {
+    opts.onEvent({ type: 'banner', text: translate(opts.lang, 'lite.banner') });
+  } else if (replyOnly) {
     opts.onEvent({ type: 'banner', text: translate(opts.lang, 'model.replyOnly') });
   }
   const fs = await sessionFs(opts.sessionId);
@@ -190,17 +196,22 @@ export async function runLiveTurn(opts: LiveTurnOptions): Promise<{ text: string
     },
   ];
 
-  const system = buildSystemPrompt({
-    projectRoot: '',
-    runtime: 'limited',
-    permissionMode: opts.permissionMode,
-    mode: opts.mode,
-    locale: opts.lang,
-  });
-  const messages: ChatMessage[] = [
+  const system = lite
+    ? LITE_SYSTEM_PROMPT
+    : buildSystemPrompt({
+        projectRoot: '',
+        runtime: 'limited',
+        permissionMode: opts.permissionMode,
+        mode: opts.mode,
+        locale: opts.lang,
+      });
+  const baseMessages: ChatMessage[] = [
     { role: 'system', text: system },
     { role: 'user', text: opts.text },
   ];
+  const messages: ChatMessage[] = lite
+    ? toLiteRequest({ model: choice.modelId, messages: baseMessages }).messages
+    : baseMessages;
 
   const result = await runAgent({
     modelId: choice.modelId,
@@ -213,9 +224,12 @@ export async function runLiveTurn(opts: LiveTurnOptions): Promise<{ text: string
     onEvent: opts.onEvent,
     model: async (req, onDelta: (delta: Delta) => void) => {
       recordRequest(choice.providerId);
-      const request = replyOnly
-        ? { ...req, model: choice.modelId, tools: undefined, toolChoice: undefined }
+      const shaped = lite
+        ? toLiteRequest({ ...req, model: choice.modelId, maxTokens: req.maxTokens ?? LITE_MAX_TOKENS })
         : { ...req, model: choice.modelId };
+      const request = replyOnly
+        ? { ...shaped, tools: undefined, toolChoice: undefined }
+        : shaped;
       try {
         return await registry.chat(choice.providerId, request, onDelta);
       } catch (err) {

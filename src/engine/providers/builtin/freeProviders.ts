@@ -56,7 +56,9 @@ export function builtinFreeProviders(): ProviderConfig[] {
       baseUrl: 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1',
       enabled: false,
       order: 2,
-      auth: { type: 'header', headerName: 'Authorization', anonymousToken: 'Bearer anonymous' },
+      // A `Bearer anonymous` header is rejected with 403 now; plain keyless
+      // requests reach the catalog and the chat endpoint (about 2 req/min).
+      auth: { type: 'none' },
       keys: [],
       headers: [],
       catalog: { path: '/models', parser: 'openai', freeFilter: 'none' },

@@ -42,6 +42,9 @@ export function parseRetryAfter(value: string | null | undefined): number | unde
   if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000;
   const seconds = trimmed.match(RETRY_AFTER);
   if (seconds) return Number(seconds[1]) * 1000;
+  // RFC 9110 allows an HTTP-date instead of a number of seconds.
+  const date = Date.parse(trimmed);
+  if (!Number.isNaN(date)) return Math.max(0, date - Date.now());
   return undefined;
 }
 

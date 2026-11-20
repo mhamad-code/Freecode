@@ -64,9 +64,13 @@ export async function secretFor(providerId: string, keyId: string): Promise<stri
   return vault.get(secretId(providerId, keyId));
 }
 
-export function registryFor(list: ProviderConfig[]): ProviderRegistry {
+export function registryFor(
+  list: ProviderConfig[],
+  deps: { fetchImpl?: typeof fetch } = {},
+): ProviderRegistry {
   return new ProviderRegistry(list, {
     getSecret: (providerId, keyId) => secretFor(providerId, keyId),
+    fetchImpl: deps.fetchImpl,
   });
 }
 

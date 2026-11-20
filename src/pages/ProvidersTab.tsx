@@ -19,6 +19,8 @@ import { testProviderConnection, type ProviderTestResult } from '../lib/modelPro
 import { catalogUrl, diagnosticsReport, type Diagnostic } from '../lib/providerDiagnostics';
 import { estimateRemaining } from '../lib/requestCounter';
 import { VaultSaveError } from '../storage/vaultDiagnostics';
+import type { LiteSetting } from '../engine/providers/lite';
+import { getLiteSetting, setLiteSetting } from '../lib/liteMode';
 
 export default function ProvidersTab() {
   const { t } = useI18n();
@@ -31,6 +33,7 @@ export default function ProvidersTab() {
   const [preset, setPreset] = useState<Preset | null>(null);
   const [keyValue, setKeyValue] = useState('');
   const [diagnostics, setDiagnostics] = useState<Record<string, Diagnostic | undefined>>({});
+  const [lite, setLite] = useState<LiteSetting>(() => getLiteSetting());
 
   const persist = (next: ProviderConfig[]) => {
     setConfigs(next);
@@ -147,6 +150,11 @@ export default function ProvidersTab() {
     persist(configs.filter((c) => c.id !== id));
   };
 
+  const changeLite = (value: LiteSetting) => {
+    setLite(value);
+    setLiteSetting(value);
+  };
+
   const builtin = configs.filter((c) => c.kind === 'builtin-free' && c.id !== 'ovh-anon');
   const moreFree = configs.filter((c) => c.kind === 'builtin-free' && c.id === 'ovh-anon');
   const custom = configs.filter((c) => c.kind !== 'builtin-free');
@@ -237,6 +245,30 @@ export default function ProvidersTab() {
         <KeyRound size={18} className="text-[var(--muted)] mt-0.5 flex-none" />
         <p className="text-[13.5px] text-[var(--muted)]">{t('providers.stored')}</p>
       </div>
+
+      <div className="card p-3.5 mb-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[14.5px] font-semibold">{t('lite.title')}</span>
+          <div className="ms-auto flex gap-1" role="group" aria-label={t('lite.title')}>
+            {(['auto', 'on', 'off'] as LiteSetting[]).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => changeLite(value)}
+                aria-pressed={lite === value}
+                className="chip h-8 px-2.5 text-[12.5px]"
+                style={lite === value ? { borderColor: 'var(--accent)', color: 'var(--text)' } : undefined}
+              >
+                {t(`lite.${value}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="text-[12.5px] text-[var(--muted)] mt-1.5">{t('lite.desc')}</p>
+        <p className="text-[12.5px] text-[var(--muted)] mt-1">{t('lite.autoHint')}</p>
+      </div>
+
+      <p className="text-[12.5px] text-[var(--muted)] mb-3">{t('providers.freeConsent')}</p>
 
       <SectionTitle icon={<Zap size={18} />} title={t('providers.builtin')} />
       <div className="flex flex-col gap-2 mt-2">{builtin.map(card)}</div>

@@ -56,10 +56,10 @@ export function healthForErrorCode(code: string): ModelHealth {
 export async function probeModel(
   providerId: string,
   modelId: string,
-  deps: { list?: ProviderConfig[] } = {},
+  deps: { list?: ProviderConfig[]; fetchImpl?: typeof fetch } = {},
 ): Promise<ProbeOutcome> {
   const list = deps.list ?? loadProviders();
-  const registry = registryFor(list);
+  const registry = registryFor(list, { fetchImpl: deps.fetchImpl });
   recordRequest(providerId);
   try {
     await registry.chat(providerId, {
@@ -190,7 +190,7 @@ export async function testProviderConnection(
   const provider = list.find((p) => p.id === providerId);
   if (!provider) return { state: 'failed', models: 0, error: 'Unknown provider' };
 
-  const registry = registryFor(list);
+  const registry = registryFor(list, { fetchImpl: options.fetchImpl });
   let diagnostic: Diagnostic | undefined;
   try {
     await registry.refreshCatalog(providerId);
@@ -254,7 +254,10 @@ export async function testProviderConnection(
   let lastId: string | undefined;
   let current = list;
   for (const candidate of candidates) {
-    const outcome = await probeModel(providerId, candidate.id, { list: current });
+    const outcome = await probeModel(providerId, candidate.id, {
+      list: current,
+      fetchImpl: options.fetchImpl,
+    });
     last = outcome;
     lastId = candidate.id;
     current = recordHealth(current, providerId, candidate.id, outcome);

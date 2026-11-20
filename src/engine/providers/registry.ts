@@ -1,5 +1,7 @@
 import { parseOpenAIStream, toOpenAIRequest } from './adapters/openaiCompatible';
 import { parseAnthropicStream, toAnthropicRequest } from './adapters/anthropic';
+import { withBackoff, type RetryOptions } from './backoff';
+import { SerialQueue } from './queue';
 import { isStale, parseCatalog, reconcileModels } from './catalog';
 import { resolveModel } from './capabilities';
 import { ProviderError, networkError, statusToError } from './errors';
@@ -20,6 +22,10 @@ export interface RegistryDeps {
   rotation?: RotationMode;
   firstByteTimeoutMs?: number;
   idleTimeoutMs?: number;
+  /** Shared by tests/UI to observe the per-provider queue. */
+  queue?: SerialQueue;
+  /** 429/5xx retry policy. Retry-After always wins, up to maxWaitMs. */
+  retry?: RetryOptions;
 }
 
 function joinUrl(base: string, path: string): string {
@@ -66,6 +72,8 @@ export class ProviderRegistry {
   private readonly rotation: RotationMode;
   private readonly firstByteTimeoutMs: number;
   private readonly idleTimeoutMs: number;
+  private readonly queue: SerialQueue;
+  private readonly retry: RetryOptions;
   private readonly cursors = new Map<string, number>();
 
   constructor(configs: ProviderConfig[], deps: RegistryDeps = {}) {
@@ -76,6 +84,8 @@ export class ProviderRegistry {
     this.rotation = deps.rotation ?? 'failure';
     this.firstByteTimeoutMs = deps.firstByteTimeoutMs ?? 60000;
     this.idleTimeoutMs = deps.idleTimeoutMs ?? 90000;
+    this.queue = deps.queue ?? new SerialQueue();
+    this.retry = { ...deps.retry };
   }
 
   list(): ProviderConfig[] {
@@ -129,7 +139,11 @@ export class ProviderRegistry {
     return { secret, keyId: picked.key.id };
   }
 
-  async refreshCatalog(id: string): Promise<ModelInfo[]> {
+  refreshCatalog(id: string): Promise<ModelInfo[]> {
+    return this.queue.run(id, () => this.refreshCatalogOnce(id));
+  }
+
+  private async refreshCatalogOnce(id: string): Promise<ModelInfo[]> {
     const provider = this.get(id);
     if (!provider) throw new ProviderError('model-not-found', `Unknown provider ${id}`);
     if (!provider.catalog.path) return provider.models;
@@ -161,7 +175,33 @@ export class ProviderRegistry {
     return this.refreshCatalog(id);
   }
 
-  async chat(
+  /** One request per provider at a time; free services count requests per IP. */
+  chat(
+    id: string,
+    req: ChatRequest,
+    onDelta?: (delta: Delta) => void,
+  ): Promise<ModelResult> {
+    return this.queue.run(id, () => this.chatOnce(id, req, onDelta));
+  }
+
+  private async chatOnce(
+    id: string,
+    req: ChatRequest,
+    onDelta?: (delta: Delta) => void,
+  ): Promise<ModelResult> {
+    let outputStarted = false;
+    const emit = (delta: Delta) => {
+      outputStarted = true;
+      onDelta?.(delta);
+    };
+    return withBackoff(() => this.attemptChat(id, req, emit), {
+      ...this.retry,
+      // Once a byte of the answer exists, a retry would duplicate it.
+      canRetry: () => !outputStarted && (this.retry.canRetry?.() ?? true),
+    });
+  }
+
+  private async attemptChat(
     id: string,
     req: ChatRequest,
     onDelta?: (delta: Delta) => void,
