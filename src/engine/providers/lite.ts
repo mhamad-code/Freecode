@@ -1,3 +1,4 @@
+import { ProviderError } from './errors';
 import type { ChatMessage, ChatRequest, ProviderConfig } from './types';
 
 export type LiteSetting = 'auto' | 'on' | 'off';
@@ -11,6 +12,13 @@ export const LITE_SYSTEM_PROMPT =
   'You are Freecode in Lite mode. Reply in the user\'s language, be brief and concrete. ' +
   'No tools are available: describe the change instead of making it, and never claim a command ran.';
 
+/**
+ * A keyless service can charge the *requested* output budget against a small
+ * per-minute allowance (LLM7 refuses a 1024-token reservation on its anonymous
+ * tier while accepting 256). One rate-limited Lite attempt is therefore retried
+ * once with this smaller budget instead of failing the turn.
+ */
+export const LITE_REDUCED_MAX_TOKENS = 256;
 export const LITE_MAX_TOKENS = 1024;
 export const LITE_HISTORY_MESSAGES = 8;
 export const LITE_MAX_MESSAGE_CHARS = 6000;
@@ -46,6 +54,22 @@ export function trimHistory(messages: ChatMessage[], limit = LITE_HISTORY_MESSAG
     }
     return text === m.text ? m : { ...m, text };
   });
+}
+
+/**
+ * The retry for a Lite turn that hit a rate limit before producing any output:
+ * same request with a smaller output budget, or null when that cannot help.
+ */
+export function liteReducedRetry(
+  req: ChatRequest,
+  err: unknown,
+  emitted: boolean,
+): ChatRequest | null {
+  if (emitted) return null;
+  if (!(err instanceof ProviderError) || err.code !== 'rate') return null;
+  const budget = req.maxTokens ?? LITE_MAX_TOKENS;
+  if (budget <= LITE_REDUCED_MAX_TOKENS) return null;
+  return { ...req, maxTokens: LITE_REDUCED_MAX_TOKENS };
 }
 
 /** The full request minus everything Lite mode drops. The input is not mutated. */

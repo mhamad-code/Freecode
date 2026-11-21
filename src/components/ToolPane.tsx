@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import {
   ArrowLeft,
@@ -49,6 +49,11 @@ import {
 } from './ui';
 
 /* ================================ shell ================================ */
+
+/** Heavy editor and terminal renderers load on first use, not with the app. */
+const CodeEditor = lazy(() => import('./CodeEditor'));
+const CompareView = lazy(() => import('./CodeEditor').then((m) => ({ default: m.DiffView })));
+const XTerm = lazy(() => import('./XTerm'));
 export function ToolPane() {
   const { t } = useI18n();
   const tabs = useStore((s) => s.toolTabs);
@@ -194,6 +199,16 @@ function FilesPanel() {
   const files = useStore((s) => s.files);
   const openFile = useStore((s) => s.openFile);
   const [query, setQuery] = useState('');
+
+  /** One honest empty file, so the editor has something to open. */
+  const newFile = () => {
+    const contents = useStore.getState().fileContents;
+    let i = 1;
+    let path = 'notes.md';
+    while (contents[path] !== undefined) path = `notes-${++i}.md`;
+    useStore.getState().createFile(path);
+    openFile(path);
+  };
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ src: true, 'src/routes': true });
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -274,7 +289,7 @@ function FilesPanel() {
     <div className="h-full flex flex-col">
       <div className="flex items-center gap-2 p-3">
         <SearchInput value={query} onValueChange={setQuery} placeholder={t('file.filter')} className="flex-1" />
-        <IBtn label={t('file.newFile')} className="w-10 h-10 rounded-[10px]" onClick={() => useStore.getState().toast('New file')} >
+        <IBtn label={t('file.newFile')} className="w-10 h-10 rounded-[10px]" onClick={() => newFile()}>
           <FilePlus size={19} />
         </IBtn>
         <IBtn label={t('file.newFolder')} className="w-10 h-10 rounded-[10px]" onClick={() => useStore.getState().toast('New folder')}>
@@ -302,14 +317,17 @@ function FilesPanel() {
 }
 
 function EditorPanel({ path }: { path: string }) {
+  const { t } = useI18n();
   const contents = useStore((s) => s.fileContents);
   const save = useStore((s) => s.saveFile);
-  const [value, setValue] = useState(contents[path] ?? '');
-  const lines = value.split('\n');
+  const saved = contents[path] ?? '';
+  const [value, setValue] = useState(saved);
+  const [diff, setDiff] = useState(false);
   useEffect(() => {
     setValue(contents[path] ?? '');
+    setDiff(false);
   }, [path, contents]);
-  const dirty = value !== (contents[path] ?? '');
+  const dirty = value !== saved;
 
   return (
     <div className="h-full flex flex-col">
@@ -317,26 +335,21 @@ function EditorPanel({ path }: { path: string }) {
         <span dir="ltr" className="truncate">{path || 'untitled'}</span>
         {dirty ? <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--warning)' }} /> : null}
         <div className="ms-auto flex items-center gap-1.5">
-          <Badge tone="info">Agent edited this file</Badge>
-          <Btn size="sm" variant="outline" onClick={() => save(path, value)}>Save</Btn>
+          <Badge tone="info">{t('editor.agentEdited')}</Badge>
+          <Btn size="sm" variant={diff ? 'primary' : 'outline'} onClick={() => setDiff((v) => !v)}>
+            {t('editor.compare')}
+          </Btn>
+          <Btn size="sm" variant="outline" onClick={() => save(path, value)}>{t('common.save')}</Btn>
         </div>
       </div>
-      <div className="flex-1 min-h-0 overflow-auto relative font-mono text-[13px] leading-[1.6]" dir="ltr">
-        <div className="flex min-h-full">
-          <div className="select-none text-end pe-3 ps-3 py-3 text-[var(--faint)]" aria-hidden>
-            {lines.map((_, i) => (
-              <div key={i}>{i + 1}</div>
-            ))}
-          </div>
-          <textarea
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            spellCheck={false}
-            className="flex-1 bg-transparent outline-none resize-none py-3 pe-4 min-h-full"
-            style={{ fontFamily: 'var(--font-mono)', fontSize: 13, lineHeight: 1.6 }}
-            aria-label={path}
-          />
-        </div>
+      <div className="flex-1 min-h-0">
+        <Suspense fallback={<div className="p-4 text-[13.5px] text-[var(--muted)]">{t('editor.loading')}</div>}>
+          {diff ? (
+            <CompareView original={saved} current={value} />
+          ) : (
+            <CodeEditor path={path} value={value} onChange={setValue} />
+          )}
+        </Suspense>
       </div>
     </div>
   );
@@ -498,35 +511,10 @@ function PreviewPanel() {
 }
 
 /* ================================ terminal ================================ */
-const BOOT_LINES: string[] = [];
-
-function useTerminal() {
-  const [lines, setLines] = useState<string[]>(BOOT_LINES);
-  const [connected, setConnected] = useState(false);
-  useEffect(() => {
-    const id = window.setTimeout(() => setConnected(true), 900);
-    return () => window.clearTimeout(id);
-  }, []);
-  return { lines, setLines, connected };
-}
-
 export function TerminalPanel({ compact }: { compact?: boolean }) {
   const { t } = useI18n();
-  const { lines, setLines, connected } = useTerminal();
-  const [input, setInput] = useState('');
   const [tabs, setTabs] = useState(['Terminal']);
   const [active, setActive] = useState(0);
-  const endRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'end' });
-  }, [lines]);
-
-  const run = (cmd: string) => {
-    if (!cmd.trim()) return;
-    setLines((l) => [...l, `~/project $ ${cmd}`, t('terminal.noRuntime')]);
-    setInput('');
-  };
 
   return (
     <div className="h-full flex flex-col min-h-0" style={{ background: 'var(--panel)' }}>
@@ -553,36 +541,17 @@ export function TerminalPanel({ compact }: { compact?: boolean }) {
           </div>
         </div>
       ) : null}
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2.5 font-mono text-[13px] leading-[1.35]" dir="ltr">
-        {lines.map((l, i) => (
-          <div key={i} className="whitespace-pre-wrap" style={{ color: l.startsWith('~/project') ? 'var(--text)' : 'var(--muted)' }}>
-            {l}
-          </div>
-        ))}
-        <div ref={endRef} />
-      </div>
-      <div className="p-2.5">
-        {connected ? (
-          <div className="flex items-center gap-2 px-3 h-10 rounded-[10px]" style={{ border: '1.5px solid var(--line-strong)', background: 'var(--elevated)' }}>
-            <span className="text-[var(--accent)] font-mono text-[13px]">~/project $</span>
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && run(input)}
-              className="flex-1 bg-transparent outline-none font-mono text-[13px]"
-              dir="ltr"
-              aria-label="Terminal input"
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <span className="w-1.5 h-4 animate-pulse" style={{ background: 'var(--accent)' }} />
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 px-3 h-10 rounded-[10px] text-[14px] text-[var(--muted)]" style={{ border: '1.5px solid var(--line-strong)' }}>
-            <Loader2 size={15} className="animate-spin" />
-            {t('terminal.connecting')}
-          </div>
-        )}
+      <div className="flex-1 min-h-0">
+        <Suspense
+          fallback={
+            <div className="flex items-center gap-2 px-3 py-3 text-[14px] text-[var(--muted)]">
+              <Loader2 size={15} className="animate-spin" />
+              {t('terminal.connecting')}
+            </div>
+          }
+        >
+          <XTerm prompt="~/project $" banner={t('terminal.banner')} noRuntime={t('terminal.noRuntime')} />
+        </Suspense>
       </div>
     </div>
   );

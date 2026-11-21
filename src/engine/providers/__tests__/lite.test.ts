@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   LITE_MAX_TOKENS,
+  LITE_REDUCED_MAX_TOKENS,
   LITE_SYSTEM_PROMPT,
+  liteReducedRetry,
   shouldUseLite,
   toLiteRequest,
   trimHistory,
 } from '../lite';
+import { ProviderError } from '../errors';
 import type { ChatMessage, ChatRequest, ProviderConfig } from '../types';
 
 const free = (limits: ProviderConfig['limits'], kind: ProviderConfig['kind'] = 'builtin-free') =>
@@ -32,6 +35,23 @@ const base = (): ChatRequest => ({
   reasoningEffort: 'high',
   maxTokens: 8000,
   temperature: 0.7,
+});
+
+describe('Lite output budget', () => {
+  it('retries a rate-limited Lite turn once with a smaller budget', () => {
+    const req = toLiteRequest(base());
+    const rate = new ProviderError('rate', 'HTTP 429', { status: 429 });
+    expect(req.maxTokens).toBe(LITE_MAX_TOKENS);
+    expect(liteReducedRetry(req, rate, false)?.maxTokens).toBe(LITE_REDUCED_MAX_TOKENS);
+  });
+
+  it('does not retry after output, for other errors, or below the small budget', () => {
+    const req = toLiteRequest(base());
+    const rate = new ProviderError('rate', 'HTTP 429', { status: 429 });
+    expect(liteReducedRetry(req, rate, true)).toBeNull();
+    expect(liteReducedRetry(req, new ProviderError('server', 'HTTP 500', { status: 500 }), false)).toBeNull();
+    expect(liteReducedRetry({ ...req, maxTokens: LITE_REDUCED_MAX_TOKENS }, rate, false)).toBeNull();
+  });
 });
 
 describe('Lite mode selection', () => {

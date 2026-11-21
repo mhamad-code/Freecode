@@ -13,12 +13,28 @@ Verified in this workspace:
 
 Not verified / still missing:
 
-- **No app-level streamed reply was observed today.** The wire-level LLM7 and Kilo responses streamed correctly with curl, but a full turn through the composer after the F1 changes was not run in the browser. Lite mode was also not exercised against a live 429 (LLM7 did not rate-limit today).
+- **No app-level streamed reply was completed on LLM7.** In the browser, LLM7's catalog returned **200** (89 models, CORS `*`) and small streamed chats returned **200 + SSE** straight from the page, but every composer turn ended in **429**: LLM7 reserves the *requested* `max_tokens` against a small anonymous budget (1024 → 429, 256/64 → 200 in the same minute), and by the end of the probing the IP's allowance was gone (`retry in 39345 seconds`). The UI behaved correctly — Lite banner, 429 error card, `lite.reduced` banner on the smaller retry, Retry button — but a rendered streamed answer through the app is still unverified.
+- **Lite retries once with a smaller budget** (`LITE_REDUCED_MAX_TOKENS = 256`) when a keyless turn is rate limited before any output. That is what LLM7 needs per request, but it cannot beat a fully spent daily allowance.
 - **Kilo remains unusable in a browser.** The service answers 200 to curl but sends no `Access-Control-Allow-Origin`, so the app keeps reporting it as unreachable/CORS-blocked. Nothing client-side can fix that.
 - **OVH is keyless but rate limited.** The built-in no longer sends `Bearer anonymous` (403). Plain chat works at the transport level but returned `429 API rate limit exceeded` with no `Retry-After` header, so the UI can only show the generic rate error and the short cooldown.
 - **LLM7 catalog now declares paid pricing** for all 89 models (USD per 1M tokens, `tier: pro|turbo`). None is marked `free`, so they stay behind "Show all" until selected or probed. Keyless requests still return 200.
 - **Lite mode is chat-only by design.** The agent loses file/edit tools while it is on; the banner says so. There is no per-turn override control in the composer.
 - **Queue is in-memory only.** Two tabs of the same profile still send independently.
+
+## F2 — CodeMirror 6 editor + xterm (this build)
+
+Verified in this workspace:
+
+- `npx tsc -b` clean; `npx vitest run` **125/125**, including the new `src/lib/__tests__/lazyHeavy.test.ts` guard.
+- `npm run build` emits `CodeEditor-*.js` (551.9 kB, 192.9 kB gzip) and `XTerm-*.js` (335.8 kB, 85.4 kB gzip) as separate chunks; the entry stays 484.1 kB (143.7 kB gzip). `node scripts/check-bundle.mjs` stays clean.
+- Real Chromium against the production build: the Files panel's "New file" creates `notes.md`, opens an editor tab and mounts CodeMirror (`.cm-editor` + `.cm-gutters`); typing `# Notes` marks the file dirty; "Compare" swaps in `@codemirror/merge` (`2` editors, `2` changed-line marks); the terminal tab mounts xterm.js, prints `terminal.banner`, echoes `ls` and answers with `terminal.noRuntime`, then shows a fresh prompt.
+
+Not verified / still missing:
+
+- The terminal executes nothing: xterm.js is only a renderer until the runtime phase adds a shell (WebContainer/Pyodide).
+- Compare diffs the saved file against the working buffer. There is no history diff, no per-hunk accept/reject in the editor, and no syntax language for languages outside the bundled set (everything else is plain text).
+- Editor and terminal were checked at desktop width only; the phone layout of the tool pane was not re-checked.
+- The new `createFile` store action creates flat `notes*.md` files; folders, uploads and renaming in the Files panel are still toasts or unimplemented.
 
 ## F0 — demo data removal (this build)
 

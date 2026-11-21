@@ -133,6 +133,8 @@ interface AppStore {
   files: FileNode[];
   openFilePath: string | null;
   openFile: (path: string) => void;
+  /** Creates an empty file (and its folders) in the in-memory project. */
+  createFile: (path: string) => void;
   saveFile: (path: string, content: string) => void;
   fileContents: Record<string, string>;
 
@@ -437,6 +439,28 @@ export const useStore = create<AppStore>((set, get) => ({
     set({ openFilePath: path });
     get().openTool('editor', path);
   },
+  createFile: (path) =>
+    set((s) => {
+      if (s.files.some((n) => n.path === path)) return {};
+      const parts = path.split('/').filter(Boolean);
+      const insert = (nodes: FileNode[], depth: number): FileNode[] => {
+        const name = parts[depth];
+        const full = parts.slice(0, depth + 1).join('/');
+        if (depth === parts.length - 1) {
+          return [...nodes, { name, path: full, type: 'file', status: 'A' }];
+        }
+        const dir = nodes.find((n) => n.type === 'dir' && n.path === full);
+        if (dir) {
+          return nodes.map((n) => (n === dir ? { ...n, children: insert(n.children ?? [], depth + 1) } : n));
+        }
+        return [...nodes, { name, path: full, type: 'dir', children: insert([], depth + 1) }];
+      };
+      return {
+        files: insert(s.files, 0),
+        fileContents: { ...s.fileContents, [path]: s.fileContents[path] ?? '' },
+        openFilePath: path,
+      };
+    }),
   saveFile: (path, content) =>
     set((s) => {
       const walk = (nodes: FileNode[]): FileNode[] =>

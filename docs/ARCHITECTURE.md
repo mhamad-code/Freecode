@@ -22,7 +22,7 @@ UI (React) ──► store.send ──► lib/agentClient.local.ts ──► eng
 | `src/engine/providers/catalog.ts` | Catalog parsers (`openai`, `openrouter`, `kilo`), staleness, retirement, default-model choice. |
 | `src/engine/providers/capabilities.ts` | Family inference and reported-value precedence. |
 | `src/engine/providers/keys.ts` / `fallback.ts` / `rateLimit.ts` / `errors.ts` | Key pools/cooldowns, fallback decisions (never replay after output), sliding-window counter, typed errors. |
-| `src/engine/providers/lite.ts` | Lite mode: compact request for free providers with tight token limits (no tools, ≤1024 output tokens). |
+| `src/engine/providers/lite.ts` | Lite mode: compact request for free providers with tight token limits (no tools, ≤1024 output tokens, one retry at 256 when the service rate-limits the reservation). |
 | `src/engine/providers/queue.ts` | One in-flight request per provider, shared by `chat` and `refreshCatalog`. |
 | `src/engine/providers/backoff.ts` | Retry-After aware retry policy (default one extra attempt, never after output). |
 | `src/engine/providers/builtin/freeProviders.ts` / `presets.ts` | Keyless free providers and bring-your-own-key presets. Model ids are never hard-coded. |
@@ -40,6 +40,8 @@ UI (React) ──► store.send ──► lib/agentClient.local.ts ──► eng
 | `src/lib/agentClient.local.ts` | Implements the live turn for the UI using the registry and the in-memory project FS. |
 | `src/lib/providersStore.ts` | Provider configs in `localStorage`; keys in the vault. |
 | `src/lib/backup.ts` | Local backup export/import (JSON). |
+| `src/components/CodeEditor.tsx` | CodeMirror 6 editor + `@codemirror/merge` compare view. Reached only through `lazy()` from `ToolPane`. |
+| `src/components/XTerm.tsx` | xterm.js terminal surface (renderer only; no shell yet), themed from the live CSS variables. Lazy chunk. |
 
 ## Provider contract
 

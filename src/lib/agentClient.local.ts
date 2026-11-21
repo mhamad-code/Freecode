@@ -5,7 +5,13 @@ import { WriteGuard } from '../engine/agent/tools/edit';
 import { editFileTool, listFilesTool, readFileTool, writeFileTool } from '../engine/agent/tools/fs';
 import { grepFiles } from '../engine/agent/tools/search';
 import { ProviderError } from '../engine/providers/errors';
-import { LITE_MAX_TOKENS, LITE_SYSTEM_PROMPT, shouldUseLite, toLiteRequest } from '../engine/providers/lite';
+import {
+  LITE_MAX_TOKENS,
+  LITE_SYSTEM_PROMPT,
+  liteReducedRetry,
+  shouldUseLite,
+  toLiteRequest,
+} from '../engine/providers/lite';
 import type { ChatMessage, Delta } from '../engine/providers/types';
 import { decode, type ProjectFS } from '../storage/projectFs';
 import { MemoryFS } from '../storage/projectFs/memory';
@@ -230,9 +236,21 @@ export async function runLiveTurn(opts: LiveTurnOptions): Promise<{ text: string
       const request = replyOnly
         ? { ...shaped, tools: undefined, toolChoice: undefined }
         : shaped;
+      let emitted = false;
+      const emit = (delta: Delta) => {
+        emitted = true;
+        onDelta(delta);
+      };
       try {
-        return await registry.chat(choice.providerId, request, onDelta);
+        return await registry.chat(choice.providerId, request, emit);
       } catch (err) {
+        const reduced = lite ? liteReducedRetry(shaped, err, emitted) : null;
+        if (reduced) {
+          // A free tier can reserve the requested output budget against a small
+          // allowance; ask for less instead of failing the turn.
+          opts.onEvent({ type: 'banner', text: translate(opts.lang, 'lite.reduced') });
+          return registry.chat(choice.providerId, reduced, emit);
+        }
         if (replyOnly || !(err instanceof ProviderError) || err.code !== 'unsupported-tools') {
           throw err;
         }
@@ -248,7 +266,7 @@ export async function runLiveTurn(opts: LiveTurnOptions): Promise<{ text: string
         return registry.chat(
           choice.providerId,
           { ...req, model: choice.modelId, tools: undefined, toolChoice: undefined },
-          onDelta,
+          emit,
         );
       }
     },
