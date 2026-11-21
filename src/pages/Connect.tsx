@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Check, ChevronLeft, Loader2, X } from 'lucide-react';
 import { useStore } from '../store';
 import logo from '../assets/brand/logo.png';
+import { BrandGlyph } from '../components/ServiceLogo';
+import { brandColor } from '../lib/brandLogos';
 
 type Field = { key: string; label: string; placeholder?: string; value?: string; helper?: string; password?: boolean };
 
@@ -128,9 +130,9 @@ export default function Connect({ onDone }: { onDone: (id?: string) => void }) {
               </span>
               <span
                 className="grid place-items-center"
-                style={{ width: 68, height: 68, borderRadius: 18, background: '#fff', boxShadow: '0 8px 24px rgba(0,0,0,.12)', color: cfg.color, fontWeight: 700, fontSize: 28 }}
+                style={{ width: 68, height: 68, borderRadius: 18, background: '#fff', boxShadow: '0 8px 24px rgba(0,0,0,.12)', color: brandColor(service) ?? cfg.color, fontWeight: 700, fontSize: 28 }}
               >
-                {cfg.monogram}
+                <BrandGlyph id={service} fallback={cfg.monogram} fallbackColor={cfg.color} size={38} />
               </span>
             </div>
             <h1 className="mt-4 text-[22px] font-bold leading-snug" style={{ color: '#111', maxWidth: 340 }}>
@@ -238,8 +240,8 @@ export default function Connect({ onDone }: { onDone: (id?: string) => void }) {
               <span className="mx-auto">{cfg.name} authorization</span>
             </div>
             <div className="p-6 text-center">
-              <div className="mx-auto w-12 h-12 rounded-xl grid place-items-center text-[20px] font-bold" style={{ background: '#f3f3f3', color: cfg.color }}>
-                {cfg.monogram}
+              <div className="mx-auto w-12 h-12 rounded-xl grid place-items-center text-[20px] font-bold" style={{ background: '#f3f3f3', color: brandColor(service) ?? cfg.color }}>
+                <BrandGlyph id={service} fallback={cfg.monogram} fallbackColor={cfg.color} size={26} />
               </div>
               <div className="text-[17px] font-semibold mt-3">Authorize Freecode</div>
               <p className="text-[13.5px] mt-1" style={{ color: '#666' }}>

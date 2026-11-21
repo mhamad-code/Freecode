@@ -3,31 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Search } from 'lucide-react';
 import { useStore } from '../store';
 import { useI18n } from '../lib/i18n';
-import type { Integration } from '../lib/types';
 import { Badge, Btn, Dialog, Input, PageTitle, SearchInput } from '../components/ui';
-
-export function ServiceTile({ integration, size = 52 }: { integration: Integration; size?: number }) {
-  return (
-    <span
-      className="grid place-items-center flex-none select-none"
-      style={{
-        width: size,
-        height: size,
-        borderRadius: Math.round(size * 0.24),
-        background: '#ffffff',
-        color: integration.color,
-        fontWeight: 700,
-        fontSize: size * 0.42,
-        letterSpacing: '-0.02em',
-        boxShadow: '0 1px 2px rgba(0,0,0,.18)',
-        border: '1px solid rgba(0,0,0,.06)',
-      }}
-      aria-hidden
-    >
-      {integration.monogram}
-    </span>
-  );
-}
+import { ServiceTile } from '../components/ServiceLogo';
 
 export default function Integrations() {
   const { t } = useI18n();

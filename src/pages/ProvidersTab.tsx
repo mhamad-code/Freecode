@@ -3,6 +3,7 @@ import { ChevronDown, ClipboardCheck, Copy, KeyRound, Plus, RefreshCw, Trash2, Z
 import { useStore } from '../store';
 import { useI18n } from '../lib/i18n';
 import { Badge, Btn, Dialog, Input, PageTitle, SectionTitle, SettingCard, Switch, useNow } from '../components/ui';
+import { ProviderMark } from '../components/ServiceLogo';
 import { PRESETS, type Preset } from '../engine/providers/builtin/presets';
 import type { ProviderConfig } from '../engine/providers/types';
 import {
@@ -177,9 +178,7 @@ export default function ProvidersTab() {
     return (
       <div key={config.id} className="card p-3.5">
         <div className="flex items-center gap-2.5 flex-wrap">
-          <div className="w-9 h-9 rounded-[10px] grid place-items-center flex-none" style={{ background: 'var(--elevated)', border: '1px solid var(--line)' }}>
-            <Zap size={17} />
-          </div>
+          <ProviderMark id={config.id} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[15.5px] font-semibold truncate">{config.label}</span>
@@ -327,12 +326,15 @@ export default function ProvidersTab() {
               key={p.id}
               type="button"
               onClick={() => setPreset(p)}
-              className="card p-2.5 text-start"
+              className="card p-2.5 text-start flex items-center gap-2.5"
               style={{ borderColor: preset?.id === p.id ? 'var(--accent)' : undefined }}
             >
-              <div className="text-[14.5px] font-semibold">{p.label}</div>
-              <div className="text-[12px] text-[var(--muted)] truncate" dir="ltr">
-                {p.baseUrl}
+              <ProviderMark id={p.id} size={30} />
+              <div className="min-w-0">
+                <div className="text-[14.5px] font-semibold truncate">{p.label}</div>
+                <div className="text-[12px] text-[var(--muted)] truncate" dir="ltr">
+                  {p.baseUrl}
+                </div>
               </div>
             </button>
           ))}

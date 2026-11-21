@@ -36,6 +36,20 @@ Not verified / still missing:
 - Editor and terminal were checked at desktop width only; the phone layout of the tool pane was not re-checked.
 - The new `createFile` store action creates flat `notes*.md` files; folders, uploads and renaming in the Files panel are still toasts or unimplemented.
 
+## F3 — real service logos (this build)
+
+Verified in this workspace:
+
+- `npx tsc -b` clean; `npx vitest run` **129/129**, including `src/lib/__tests__/brandLogos.test.ts` (every integration resolves a mark except Slack; every provider/preset id either resolves or is listed in `NO_BRAND_LOGO`; every mark has a path and a six-digit hex).
+- `npm run build` ok and `node scripts/check-bundle.mjs` clean. The entry chunk grows from 484.1 kB (143.7 kB gzip) to 508.6 kB (155.2 kB gzip) because the icon paths are static data; `CodeEditor` (192.9 kB gzip) and `XTerm` (85.4 kB gzip) remain separate lazy chunks.
+- Real Chromium against the production build: `/integrations` renders 15 of 16 marks in 52 px white tiles, each in its own brand hex (`rgba` checked per tile); Slack renders its monogram. `/settings/providers` renders the OVH mark on `ovh-anon` and the generic glyph on `llm7`/`kilo-free`. The Add-provider dialog renders OpenRouter, Google Gemini, Anthropic, DeepSeek, Mistral, Ollama and LM Studio marks, with OpenAI, Groq, xAI and Together on the generic glyph. `/connect/github` renders the GitHub mark beside the Freecode logo. Only one Chrome `Password field is not contained in a form` hint appeared in the console.
+
+Not verified / still missing:
+
+- **Seven brands have no mark.** `simple-icons` does not ship Slack, OpenAI, xAI (removed over trademark policy) or Groq, Together, Kilo and LLM7 (never included). Their tiles keep the monogram or the generic `Zap` glyph rather than an invented path; `NO_BRAND_LOGO` records them.
+- Brand hexes are the vendors' published colours, which is the one place a literal colour is intentional; everything else still comes from theme tokens.
+- Marks were inspected at desktop width only, and not with the high-contrast or reduced-motion settings.
+
 ## F0 — demo data removal (this build)
 
 Verified in this workspace:
@@ -56,7 +70,7 @@ Not verified / still missing:
 - `npx tsc -b` passes (strict).
 - `npx vitest run` passes: **95 tests** covering the SSE parser (fragmented chunks, multi-byte, comments, `[DONE]`, early end), both adapters (text, reasoning, tool-call fragments, object arguments, inline thinking, mid-stream errors), errors/status mapping, sliding-window rate counter, key pool/cooldowns, fallback decisions, catalog parsing/fetch shape, model catalog grouping/defaults, edit application (exact/multiple/fuzzy/indent/trailing newline), write guard, manifest diff, grep, system prompt, agent loop (tool run, permission ask/deny), vault AES-GCM round-trip and passphrase verify, redactor, path safety, the `MemoryFS` ProjectFS contract, EN/AR key parity, popover opacity/contrast and z-index order.
 - `npx vite build` passes (≈143 KB gzip JS); `dist/` contains `_headers` and `_redirects`.
-- **Cloudflare Pages target:** `<project>.pages.dev` serves `dist/`. `public/_headers` sets `cross-origin-opener-policy: same-origin` and `cross-origin-embedder-policy: credentialless`; `public/_redirects` maps `/*  /index.html  200` for SPA deep links; `.node-version` pins Node 20. The build was **not deployed from this workspace** (no deployment is allowed here), so the live headers and `crossOriginIsolated` on Cloudflare are **not yet verified**. Verify after the first deploy with Settings → General → Data → Runtime status or `curl -I`.
+- **Cloudflare Pages target:** `<project>.pages.dev` serves `dist/`. `public/_headers` sets `cross-origin-opener-policy: same-origin` and `cross-origin-embedder-policy: credentialless`; `public/_redirects` maps `/*  /index.html  200` for SPA deep links; `.node-version` pins Node 20. The production deployment (`https://freecode-2j3.pages.dev`, `main`) was checked with `curl -I`: `HTTP/2 200`, `cross-origin-opener-policy: same-origin`, `cross-origin-embedder-policy: credentialless`, and a deep link (`/settings`) answers 200 through the SPA fallback. `crossOriginIsolated` inside the deployed tab, and therefore the WebContainers runtime, still has to be verified in a browser once F4 lands.
 - **Browser model catalogs and providers (production build, local `vite preview`, real Chromium) — historical, partially superseded by F1 above:**
   - `llm7`: catalog **200 / 86 models**. Tests probe up to three of the provider's own chat models: `gemini-3-flash` → **401 needs key**, `gemini-3.0-pro-image` and `gemini-3.1-flash-image` → **400 no tools**. `gemma-3-27b` probed **400 "does not support tools"** and is marked reply-only. `gpt-oss:20b` probed **200 OK with tools** and became the selected model (`health: ok`).
   - `kilo-free`: catalog fails in the browser (`net::ERR_FAILED`, then `ERR_BLOCKED_BY_RESPONSE.NotSameOrigin`; DevTools reports no `Access-Control-Allow-Origin`). The app labels it "Cannot reach the service from your network" because both the CORS and `no-cors` probes are blocked by the browser; after two failures it starts a 30s cooldown (countdown shown) instead of retrying continuously.
