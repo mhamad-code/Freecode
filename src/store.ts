@@ -234,8 +234,6 @@ interface AppStore {
   resolveHunk: (path: string, hunkId: string, state: 'accepted' | 'rejected') => void;
   acceptAll: () => void;
   commit: (msg: string) => void;
-  push: () => void;
-  pull: () => void;
   checkout: (branch: string) => void;
 
   integrations: Integration[];
@@ -896,17 +894,9 @@ export const useStore = create<AppStore>((set, get) => ({
         commits: [{ hash, message: msg.trim(), author: 'You', at: Date.now() }, ...s.git.commits],
       },
     }));
-    get().toast(`Committed ${hash}`, 'Undo', () => {
+    get().toast(`Saved local snapshot ${hash}`, 'Undo', () => {
       set((s) => ({ git: { ...s.git, files: [...staged, ...s.git.files], commits: s.git.commits.slice(1), ahead: Math.max(0, s.git.ahead - 1) } }));
     });
-  },
-  push: () => {
-    get().toast('Pushed to origin/main');
-    set((s) => ({ git: { ...s.git, ahead: 0 } }));
-  },
-  pull: () => {
-    get().toast('Pulled from origin/main');
-    set((s) => ({ git: { ...s.git, behind: 0 } }));
   },
   checkout: (branch) =>
     set((s) => ({

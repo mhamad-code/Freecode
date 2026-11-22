@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import {
   ArrowLeft,
@@ -17,6 +18,7 @@ import {
   FolderPlus,
   GitBranch,
   GitCommitHorizontal,
+  Github,
   Globe,
   LayoutList,
   ListTree,
@@ -35,6 +37,8 @@ import {
 import { useStore } from '../store';
 import { useI18n } from '../lib/i18n';
 import { runtimeSupport, startPreviewWithRuntime, useRuntime } from '../runtime';
+import { diffAgainstRemote, getRemoteBlobs, listBranches, listRepos, pushFiles, type GitHubBranch, type GitHubRepo } from '../lib/github';
+import { setRepoTarget, useGithubToken, useRepoTarget } from '../lib/githubAuth';
 import type { ChangedFile, FileNode, ToolTab } from '../lib/types';
 import {
   Badge,
@@ -1335,6 +1339,202 @@ function DiffView({ file, onClose }: { file: ChangedFile; onClose: () => void })
   );
 }
 
+function GithubBar() {
+  const { t } = useI18n();
+  const token = useGithubToken();
+  const target = useRepoTarget();
+  const files = useStore((s) => s.fileContents);
+  const toast = useStore((s) => s.toast);
+  const [repos, setRepos] = useState<GitHubRepo[] | null>(null);
+  const [branches, setBranches] = useState<GitHubBranch[] | null>(null);
+  const [repoPick, setRepoPick] = useState('');
+  const [branchPick, setBranchPick] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [problem, setProblem] = useState('');
+  const [diff, setDiff] = useState<number | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    if (!token) {
+      setRepos(null);
+      return;
+    }
+    listRepos((input, init) => fetch(input, init), token)
+      .then((list) => {
+        if (alive) setRepos(list);
+      })
+      .catch((error: unknown) => {
+        if (alive) setProblem(error instanceof Error ? error.message : 'Could not list repositories.');
+      });
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!token || !target) {
+      setBranches(null);
+      return;
+    }
+    setDiff(null);
+    getRemoteBlobs((input, init) => fetch(input, init), token, target.owner, target.repo, target.branch)
+      .then((remote) => diffAgainstRemote(files, remote))
+      .then((changes) => {
+        if (alive) setDiff(changes.length);
+      })
+      .catch(() => {
+        if (alive) setDiff(null);
+      });
+    listBranches((input, init) => fetch(input, init), token, target.owner, target.repo)
+      .then((list) => {
+        if (alive) setBranches(list);
+      })
+      .catch(() => {
+        if (alive) setBranches([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [token, target, files]);
+
+  if (!token) {
+    return (
+      <div className="px-3 py-2.5 border-b border-[var(--line)] text-[12.5px] text-[var(--muted)]">
+        <div className="flex items-center gap-2">
+          <Github size={15} className="flex-none" />
+          <span className="flex-1">{t('github.localOnly')}</span>
+          <Link to="/connect/github" className="chip h-7 text-[12px] flex-none">
+            {t('github.connect')}
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const push = async () => {
+    if (!target) return;
+    setBusy(true);
+    setProblem('');
+    try {
+      const result = await pushFiles((input, init) => fetch(input, init), token, {
+        owner: target.owner,
+        repo: target.repo,
+        branch: target.branch,
+        message: message.trim() || 'Update from Freecode',
+        files,
+      });
+      setMessage('');
+      toast(`Pushed ${result.commitSha.slice(0, 7)} to ${target.owner}/${target.repo}`, 'View commit', () =>
+        window.open(result.commitUrl, '_blank', 'noopener'),
+      );
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : 'Push failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pickedRepo = repos?.find((r) => r.full_name === repoPick);
+
+  return (
+    <div className="px-3 py-2.5 border-b border-[var(--line)] text-[12.5px]">
+      <div className="flex items-center gap-2">
+        <Github size={15} className="flex-none text-[var(--muted)]" />
+        {target ? (
+          <>
+            <span className="font-mono truncate" dir="ltr">
+              {target.owner}/{target.repo}
+            </span>
+            <select
+              aria-label={t('github.branch')}
+              value={target.branch}
+              onChange={(e) => setRepoTarget({ ...target, branch: e.target.value })}
+              className="chip h-7 text-[12px]"
+            >
+              {(branches ?? [{ name: target.branch, commit: { sha: '' } }]).map((b) => (
+                <option key={b.name} value={b.name}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="text-[11.5px] text-[var(--muted)] hover:text-[var(--text)]"
+              onClick={() => setRepoTarget(null)}
+            >
+              {t('github.change')}
+            </button>
+            <Btn size="sm" variant="outline" className="ms-auto" disabled={busy} onClick={() => void push()}>
+              {busy ? t('github.pushing') : t('changes.push')}
+            </Btn>
+          </>
+        ) : (
+          <>
+            <select
+              aria-label={t('github.repository')}
+              value={repoPick}
+              onChange={(e) => {
+                setRepoPick(e.target.value);
+                setBranchPick(repos?.find((r) => r.full_name === e.target.value)?.default_branch ?? 'main');
+              }}
+              className="chip h-7 text-[12px] min-w-0 flex-1"
+            >
+              <option value="">{repos === null ? t('github.loading') : t('github.chooseRepo')}</option>
+              {(repos ?? []).map((r) => (
+                <option key={r.id} value={r.full_name}>
+                  {r.full_name}
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label={t('github.branch')}
+              value={branchPick || pickedRepo?.default_branch || ''}
+              onChange={(e) => setBranchPick(e.target.value)}
+              className="chip h-7 text-[12px] w-[92px]"
+              dir="ltr"
+            />
+            <Btn
+              size="sm"
+              variant="outline"
+              disabled={!pickedRepo}
+              onClick={() => {
+                if (!pickedRepo) return;
+                setRepoTarget({
+                  owner: pickedRepo.owner.login,
+                  repo: pickedRepo.name,
+                  branch: branchPick || pickedRepo.default_branch,
+                });
+              }}
+            >
+              {t('github.use')}
+            </Btn>
+          </>
+        )}
+      </div>
+      {target ? (
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder={t('github.message')}
+            className="chip h-7 text-[12px] flex-1"
+          />
+          <span className="text-[11px] text-[var(--faint)] whitespace-nowrap">
+            {diff === null ? t('github.allFiles') : diff === 0 ? t('github.upToDate') : t('github.diff', { n: diff })}
+          </span>
+        </div>
+      ) : null}
+      {problem ? (
+        <p className="mt-2 text-[11.5px]" style={{ color: 'var(--danger)' }} dir="ltr">
+          {problem}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function ChangesPanel() {
   const { t } = useI18n();
   const git = useStore((s) => s.git);
@@ -1342,8 +1542,6 @@ function ChangesPanel() {
   const stageAll = useStore((s) => s.stageAll);
   const acceptAll = useStore((s) => s.acceptAll);
   const commit = useStore((s) => s.commit);
-  const push = useStore((s) => s.push);
-  const pull = useStore((s) => s.pull);
   const checkout = useStore((s) => s.checkout);
   const [tab, setTab] = useState<'changes' | 'history' | 'branches'>('changes');
   const [msg, setMsg] = useState('');
@@ -1388,6 +1586,7 @@ function ChangesPanel() {
 
   return (
     <div className="h-full flex flex-col min-h-0">
+      <GithubBar />
       <div className="px-3 pt-3 pb-2 border-b border-[var(--line)]">
         <div className="flex items-center gap-1.5">
           <Menu
@@ -1409,8 +1608,7 @@ function ChangesPanel() {
           </Menu>
           <span className="text-[12.5px] text-[var(--muted)]">↑{git.ahead} ↓{git.behind}</span>
           <div className="ms-auto flex gap-1.5">
-            <Btn size="sm" variant="outline" onClick={pull}>{t('changes.pull')}</Btn>
-            <Btn size="sm" variant="outline" disabled={git.ahead === 0} onClick={push}>{t('changes.push')}</Btn>
+            <Btn size="sm" variant="outline" disabled title={t('changes.pullUnavailable')}>{t('changes.pull')}</Btn>
           </div>
         </div>
         <div className="mt-2.5">
@@ -1463,7 +1661,7 @@ function ChangesPanel() {
               </div>
               {changesOpen ? unstaged.map((f) => <FileRow key={f.path} f={f} />) : null}
               {!git.files.length ? (
-                <div className="text-center py-8 text-[14px] text-[var(--muted)]">{t('changes.noChanges')}</div>
+                <div className="text-center py-8 px-4 text-[13.5px] text-[var(--muted)]">{t('changes.noFilesLocal')}</div>
               ) : null}
             </div>
           </div>
@@ -1495,16 +1693,17 @@ function ChangesPanel() {
                   size="sm"
                   variant="primary"
                   disabled={!staged.length || !msg.trim()}
+                  title={staged.length ? undefined : t('changes.commitNeedsRepo')}
                   onClick={() => { commit(msg); setMsg(''); }}
                   className="rounded-e-none"
                 >
-                  {t('changes.commit')} {staged.length ? `${staged.length} files` : ''}
+                  {t('changes.commitLocal')} {staged.length ? `${staged.length} files` : ''}
                 </Btn>
                 <Menu
                   trigger={<Btn size="sm" variant="primary" className="rounded-s-none border-s border-[color-mix(in_srgb,var(--accent)_60%,#000)] px-1.5"><ChevronDown size={14} /></Btn>}
                   width={210}
                 >
-                  <MenuItem onClick={() => { commit(msg); setMsg(''); push(); }}>Commit &amp; push</MenuItem>
+                  <MenuItem disabled reason={t('github.useBar')}>Commit &amp; push</MenuItem>
                   <MenuItem disabled reason={t('toolbar.githubUnavailable')}>Commit &amp; create PR</MenuItem>
                   <MenuItem disabled reason={t('changes.amendUnavailable')}>{t('changes.amend')}</MenuItem>
                 </Menu>
@@ -1516,6 +1715,7 @@ function ChangesPanel() {
 
       {tab === 'history' ? (
         <div className="flex-1 overflow-y-auto p-2">
+          <p className="px-2 pb-2 text-[11.5px] text-[var(--faint)]">{t('changes.localHistory')}</p>
           {git.commits.map((c) => (
             <div key={c.hash} className="w-full flex items-start gap-2.5 px-2 py-2.5 rounded-lg text-start">
               <GitCommitHorizontal size={16} className="text-[var(--muted)] mt-0.5" />

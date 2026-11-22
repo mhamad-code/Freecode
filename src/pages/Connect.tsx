@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useI18n } from '../lib/i18n';
+import { getViewer, GitHubError } from '../lib/github';
+import { setGithubToken } from '../lib/githubAuth';
 import { Check, ChevronLeft, Loader2, X } from 'lucide-react';
 import { useStore } from '../store';
 import logo from '../assets/brand/logo.png';
@@ -57,12 +60,36 @@ export default function Connect({ onDone }: { onDone: (id?: string) => void }) {
     cfg.fields?.forEach((f) => (init[f.key] = f.value ?? ''));
     return init;
   });
+  const { t } = useI18n();
   const [state, setState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [errorText, setErrorText] = useState('');
   const connectIntegration = useStore((s) => s.connectIntegration);
   const [popup, setPopup] = useState(false);
 
   const required = cfg.fields?.filter((f) => !f.value) ?? [];
   const ready = cfg.oauth ? true : required.every((f) => values[f.key]?.trim());
+
+  /** GitHub tokens are verified against the real API before anything is stored. */
+  const connectGithub = async () => {
+    setState('loading');
+    setErrorText('');
+    try {
+      const viewer = await getViewer((input, init) => fetch(input, init), values.token ?? '');
+      setGithubToken(values.token ?? '');
+      setState('success');
+      connectIntegration('github', viewer.login);
+      window.setTimeout(() => onDone('github'), 900);
+    } catch (error) {
+      setState('error');
+      setErrorText(
+        error instanceof GitHubError
+          ? `${error.message} (HTTP ${error.status})`
+          : error instanceof Error
+            ? error.message
+            : 'GitHub could not be reached.',
+      );
+    }
+  };
 
   const finish = (account?: string) => {
     setState('loading');
@@ -153,11 +180,21 @@ export default function Connect({ onDone }: { onDone: (id?: string) => void }) {
             <>
               <div className="px-6 pt-6 pb-5">
                 {cfg.oauth ? (
-                  <p className="text-[15px] leading-relaxed" style={{ color: '#5f5f63' }}>
-                    {cfg.description} You&apos;ll sign in to {cfg.name} and approve access. Nothing is stored on our servers.
-                  </p>
+                  <div>
+                    <p className="text-[15px] leading-relaxed" style={{ color: '#5f5f63' }}>
+                      {cfg.description} You&apos;ll sign in to {cfg.name} and approve access. Nothing is stored on our servers.
+                    </p>
+                    <p className="mt-3 px-3 py-2 rounded-lg text-[13px] leading-relaxed" style={{ background: '#fff7e0', color: '#7a5200', border: '1px solid #f0d9a0' }}>
+                      {t('connect.localOnly')}
+                    </p>
+                  </div>
                 ) : (
                   <div className="flex flex-col gap-4">
+                    {service === 'github' ? (
+                      <p className="text-[13px] leading-relaxed" style={{ color: '#6b6b6b' }}>
+                        The token is checked against api.github.com when you continue and is kept in this tab only (sessionStorage), never in your profile or backups.
+                      </p>
+                    ) : null}
                     {cfg.fields?.map((f) => (
                       <div key={f.key}>
                         <label htmlFor={f.key} className="text-[15px] font-semibold" style={{ color: '#6b6b6b' }}>
@@ -195,8 +232,8 @@ export default function Connect({ onDone }: { onDone: (id?: string) => void }) {
                   </div>
                 )}
                 {state === 'error' ? (
-                  <div className="mt-4 px-3 py-2 rounded-lg text-[13.5px]" style={{ background: '#fdecec', color: '#b3261e', border: '1px solid #f5c2c0' }}>
-                    Could not connect. Check the credentials and try again.
+                  <div className="mt-4 px-3 py-2 rounded-lg text-[13.5px] leading-relaxed" style={{ background: '#fdecec', color: '#b3261e', border: '1px solid #f5c2c0' }} dir="ltr">
+                    {errorText || 'Could not connect. Check the credentials and try again.'}
                   </div>
                 ) : null}
               </div>
@@ -205,7 +242,7 @@ export default function Connect({ onDone }: { onDone: (id?: string) => void }) {
                 <button
                   type="button"
                   disabled={!ready || state === 'loading'}
-                  onClick={() => (cfg.oauth ? setPopup(true) : finish())}
+                  onClick={() => (cfg.oauth ? setPopup(true) : service === 'github' ? void connectGithub() : finish())}
                   className="w-full inline-flex items-center justify-center gap-2 font-medium transition-transform active:translate-y-px"
                   style={{
                     height: 52,
@@ -217,10 +254,10 @@ export default function Connect({ onDone }: { onDone: (id?: string) => void }) {
                   }}
                 >
                   {state === 'loading' ? <Loader2 size={18} className="animate-spin" /> : null}
-                  {state === 'loading' ? 'Connecting…' : cfg.oauth ? `Continue with ${cfg.name}` : 'Connect Account'}
+                  {state === 'loading' ? 'Connecting…' : cfg.oauth ? `Continue with ${cfg.name}` : service === 'github' ? 'Verify token & connect' : 'Connect Account'}
                 </button>
                 <div className="text-center text-[13px] mt-3" style={{ color: '#777' }}>
-                  Secured by Composio
+                  {service === 'github' ? 'Verified directly with GitHub' : 'Credentials stay in this browser.'}
                 </div>
               </div>
             </>
@@ -246,6 +283,9 @@ export default function Connect({ onDone }: { onDone: (id?: string) => void }) {
               <div className="text-[17px] font-semibold mt-3">Authorize Freecode</div>
               <p className="text-[13.5px] mt-1" style={{ color: '#666' }}>
                 {cfg.name} will share the scopes you approve with Freecode.
+              </p>
+              <p className="text-[12px] mt-2 px-2 py-1.5 rounded-md" style={{ background: '#fff7e0', color: '#7a5200' }}>
+                {t('connect.localOnly')}
               </p>
               <div className="flex gap-2 mt-5">
                 <button type="button" className="flex-1 h-10 rounded-lg text-[14px]" style={{ background: '#f2f2f2', color: '#333' }} onClick={() => setPopup(false)}>

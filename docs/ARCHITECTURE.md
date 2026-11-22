@@ -55,6 +55,8 @@ UI (React) ──► store.send ──► lib/agentClient.local.ts ──► eng
 | `src/runtime/terminal.ts` | Bridges an xterm surface to `container.spawn('jsh')`: input, output stream and resize. |
 | `src/runtime/previewServer.ts` / `preview.ts` | The static server written into `.freecode/preview-server.cjs` and the runner that waits for the `server-ready` event on port 5173. |
 | `src/runtime/state.ts` / `index.ts` | External store for boot/preview state and the public runtime facade used by the panels. |
+| `src/lib/github.ts` | GitHub REST client with an injected `fetch`: viewer, repos, branches, branch head/tree, blob ids, remote diff, and an atomic commit (blobs → tree with `base_tree` → commit → ref update). |
+| `src/lib/githubAuth.ts` | The PAT for the current tab (`sessionStorage`, never in the profile) and the `owner/repo/branch` target (`localStorage`), exposed with `useSyncExternalStore` hooks. |
 
 ## Provider contract
 

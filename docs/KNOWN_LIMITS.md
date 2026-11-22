@@ -108,6 +108,22 @@ Not verified / still missing:
 - **Persistence is one profile per device and browser.** Nothing is encrypted in IndexedDB (provider keys stay in the vault), opening two tabs writes the same snapshot, and the last tab to save wins — there is no multi-tab lock.
 - **The saved snapshot is written on a debounce (800 ms) and on `pagehide`.** A hard crash can lose the last moments of a turn. Sessions are stored whole, not incrementally, so very large histories will make each write heavier.
 
+## F7 — GitHub (this build)
+
+Verified:
+
+- `npx tsc -b` clean; `npx vitest run` **182/182** (7 new GitHub tests), plus the opt-in read-only live test that authenticated and listed repositories against the real api.github.com with a real token.
+- `npm run build` and the bundle guard are clean.
+- Real Chromium: an invalid PAT on `/connect/github` shows GitHub's own `Bad credentials (HTTP 401)` and is not stored; the Changes panel shows the local-only GitHub bar and a disabled Pull with its reason.
+
+Not verified / still missing:
+
+- **No UI-driven push.** The full request sequence (blobs → tree → commit → ref) is unit-tested with a fake `fetch`; pushing to a real repository from the browser was not performed, because that requires pasting a live token into the test browser.
+- **No file staging.** The Changes list is not populated from the workspace; Push sends every text file as one commit. `git.files`, staging, hunk accept and the local History entries remain browser-only snapshots (`Saved local snapshot …`), not Git objects.
+- **No pull, branch creation, amend or PR.** Those entries are disabled with reasons.
+- **The token lives in `sessionStorage`.** It survives a reload of the same tab, not a new tab; there is no vault-backed credential entry yet (F8/F9).
+- Repository picker loads at most 100 repos, sorted by update; there is no search or pagination.
+
 ## H — UI honesty pass (this build)
 
 Verified in this workspace:
