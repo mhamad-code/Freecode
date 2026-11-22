@@ -2,12 +2,13 @@ import { useEffect, useRef } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
+import { attachShell } from '../runtime/terminal';
 
 /**
- * The terminal is a real xterm.js instance, but there is still no shell behind
- * it: a typed command is echoed and answered with the honest "no runtime" line
- * instead of fake output. The Pyodide/WebContainer shell arrives with the
- * runtime phase.
+ * A real xterm.js instance. With `shell` it is wired to the WebContainer's
+ * `jsh` process, so commands really run. Without a runtime (no cross-origin
+ * isolation) it stays an honest renderer: the command is echoed and answered
+ * with `noRuntime` instead of fake output.
  */
 
 const token = (name: string, fallbackVar?: string): string | undefined => {
@@ -46,13 +47,19 @@ function readTheme() {
 
 export interface XTermProps {
   prompt: string;
-  /** Printed once when the terminal opens. */
+  /** Printed when no shell can be attached. */
   banner: string;
-  /** Answer to every entered command, because nothing executes yet. */
+  /** Answer to every entered command when no shell can be attached. */
   noRuntime: string;
+  /** Attach the container shell instead of the local echo. */
+  shell: boolean;
+  /** Printed while the container shell starts. */
+  starting: string;
+  /** Printed if the container shell cannot start. */
+  failed: string;
 }
 
-export default function XTerm({ prompt, banner, noRuntime }: XTermProps) {
+export default function XTerm({ prompt, banner, noRuntime, shell, starting, failed }: XTermProps) {
   const host = useRef<HTMLDivElement>(null);
   const answer = useRef(noRuntime);
   answer.current = noRuntime;
@@ -74,36 +81,57 @@ export default function XTerm({ prompt, banner, noRuntime }: XTermProps) {
     term.loadAddon(fit);
     term.open(host.current);
     fit.fit();
-    term.writeln(banner);
-    term.write(prompt);
 
-    let buffer = '';
-    const data = term.onData((input) => {
-      for (const ch of input) {
-        if (ch === '\r' || ch === '\n') {
-          term.write('\r\n');
-          const command = buffer.trim();
-          buffer = '';
-          if (command) term.writeln(answer.current);
-          term.write(prompt);
-        } else if (ch === '\u007f') {
-          if (buffer) {
-            buffer = buffer.slice(0, -1);
-            term.write('\b \b');
+    let disposed = false;
+    let detach: (() => void) | undefined;
+
+    if (shell) {
+      term.writeln(starting);
+      attachShell(term)
+        .then((cleanup) => {
+          if (disposed) {
+            cleanup();
+            return;
           }
-        } else if (ch === '\u0003') {
-          buffer = '';
-          term.write('^C\r\n');
-          term.write(prompt);
-        } else if (ch === '\u000c') {
-          term.clear();
-          term.write(prompt);
-        } else if (ch >= ' ') {
-          buffer += ch;
-          term.write(ch);
+          detach = cleanup;
+        })
+        .catch((error: unknown) => {
+          if (disposed) return;
+          term.writeln(failed);
+          term.writeln(String(error instanceof Error ? error.message : error));
+        });
+    } else {
+      term.writeln(banner);
+      term.write(prompt);
+      let buffer = '';
+      const data = term.onData((input) => {
+        for (const ch of input) {
+          if (ch === '\r' || ch === '\n') {
+            term.write('\r\n');
+            const command = buffer.trim();
+            buffer = '';
+            if (command) term.writeln(answer.current);
+            term.write(prompt);
+          } else if (ch === '\u007f') {
+            if (buffer) {
+              buffer = buffer.slice(0, -1);
+              term.write('\b \b');
+            }
+          } else if (ch === '\u0003') {
+            buffer = '';
+            term.write('^C\r\n');
+            term.write(prompt);
+          } else if (ch === '\u000c') {
+            term.clear();
+            term.write(prompt);
+          } else if (ch >= ' ') {
+            buffer += ch;
+            term.write(ch);
+          }
         }
-      }
-    });
+      });
+      detach = () => data.dispose();
+    }
 
     const observer = new ResizeObserver(() => {
       try {
@@ -124,12 +152,13 @@ export default function XTerm({ prompt, banner, noRuntime }: XTermProps) {
     mutations.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'data-theme', 'class'] });
 
     return () => {
+      disposed = true;
       observer.disconnect();
       mutations.disconnect();
-      data.dispose();
+      detach?.();
       term.dispose();
     };
-  }, [banner, prompt]);
+  }, [banner, prompt, shell, starting, failed]);
 
   return <div ref={host} className="h-full min-h-0 w-full px-2 py-1.5" style={{ background: 'var(--panel)' }} />;
 }

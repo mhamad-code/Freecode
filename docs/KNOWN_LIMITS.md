@@ -50,6 +50,24 @@ Not verified / still missing:
 - Brand hexes are the vendors' published colours, which is the one place a literal colour is intentional; everything else still comes from theme tokens.
 - Marks were inspected at desktop width only, and not with the high-contrast or reduced-motion settings.
 
+## F4 — runtime (WebContainers, real FS, preview) (this build)
+
+Verified in this workspace:
+
+- **`crossOriginIsolated` on production is `true`.** In Chrome 156 on `https://freecode-2j3.pages.dev` (deployment `da60df30`, source `14751e1`), `crossOriginIsolated === true` and `typeof SharedArrayBuffer === 'function'`; the document answers with `cross-origin-opener-policy: same-origin` and `cross-origin-embedder-policy: credentialless`. This closes the F1–F3 open item.
+- `npx tsc -b` clean; `npx vitest run` **139/139**, including 10 new runtime tests (file-tree mapping, preview server source is valid JavaScript and listens on the requested port, path-traversal guard, listing fallback, state store, and a scan that no app file statically imports `@webcontainer/api`).
+- `npm run build` ok: the entry is 517.1 kB (158.4 kB gzip) and the WebContainer client ships as its own 12.2 kB chunk; the entry chunk contains no `webcontainer` string. `node scripts/check-bundle.mjs` clean.
+- Real Chromium against the production build through `scripts/serve-dist.mjs`: the terminal booted `jsh` inside the container and executed `ls -la`, `echo "<h1>…</h1>" > index.html && cat index.html` with real output; a file created with “New file” and saved in the editor (`notes.md`) was readable inside the container with its content; “Start preview” launched the in-container static server, the panel showed the `…-5173--….local-credentialless.webcontainer-api.io` URL in an iframe, and that iframe rendered the mounted `index.html`. No console errors or warnings were captured.
+
+Not verified / still missing:
+
+- **The preview is a static server, not a dev server.** It serves the mounted files on 5173; it does not run `npm install`, `npm run dev`, or any framework build step, so a project that needs a bundler will not preview yet.
+- **The container file system is not persistent.** Files are mounted from the store at boot and saves are written through while the runtime lives, but a reload starts from the store again. The Files list still comes from `useStore`, not from OPFS, so file-list persistence and OPFS hydration remain F6 work.
+- **The agent still edits an in-memory `ProjectFS`.** Its files are not the container's files, so agent edits do not appear in the preview or the shell until F5 reunites them.
+- **Isolation depends on how the page is served.** Cloudflare Pages and `serve-dist.mjs` set COOP/COEP; a bare `vite dev` page is not isolated and therefore shows the limited banner and no shell. The `*.style.dev` preview is isolated only when it serves the built `dist/`.
+- The preview was inspected at desktop width only; the 320 px phone frame clips long headings, and no phone-sized interaction test was run.
+- `printf` is not available in `jsh` (use `echo` or `node -e`); that is a shell quirk of the container, not an app feature.
+
 ## F0 — demo data removal (this build)
 
 Verified in this workspace:
@@ -70,7 +88,7 @@ Not verified / still missing:
 - `npx tsc -b` passes (strict).
 - `npx vitest run` passes: **95 tests** covering the SSE parser (fragmented chunks, multi-byte, comments, `[DONE]`, early end), both adapters (text, reasoning, tool-call fragments, object arguments, inline thinking, mid-stream errors), errors/status mapping, sliding-window rate counter, key pool/cooldowns, fallback decisions, catalog parsing/fetch shape, model catalog grouping/defaults, edit application (exact/multiple/fuzzy/indent/trailing newline), write guard, manifest diff, grep, system prompt, agent loop (tool run, permission ask/deny), vault AES-GCM round-trip and passphrase verify, redactor, path safety, the `MemoryFS` ProjectFS contract, EN/AR key parity, popover opacity/contrast and z-index order.
 - `npx vite build` passes (≈143 KB gzip JS); `dist/` contains `_headers` and `_redirects`.
-- **Cloudflare Pages target:** `<project>.pages.dev` serves `dist/`. `public/_headers` sets `cross-origin-opener-policy: same-origin` and `cross-origin-embedder-policy: credentialless`; `public/_redirects` maps `/*  /index.html  200` for SPA deep links; `.node-version` pins Node 20. The production deployment (`https://freecode-2j3.pages.dev`, `main`) was checked with `curl -I`: `HTTP/2 200`, `cross-origin-opener-policy: same-origin`, `cross-origin-embedder-policy: credentialless`, and a deep link (`/settings`) answers 200 through the SPA fallback. `crossOriginIsolated` inside the deployed tab, and therefore the WebContainers runtime, still has to be verified in a browser once F4 lands.
+- **Cloudflare Pages target:** `<project>.pages.dev` serves `dist/`. `public/_headers` sets `cross-origin-opener-policy: same-origin` and `cross-origin-embedder-policy: credentialless`; `public/_redirects` maps `/*  /index.html  200` for SPA deep links; `.node-version` pins Node 20. The production deployment (`https://freecode-2j3.pages.dev`, `main`) was checked with `curl -I`: `HTTP/2 200`, `cross-origin-opener-policy: same-origin`, `cross-origin-embedder-policy: credentialless`, and a deep link (`/settings`) answers 200 through the SPA fallback. `crossOriginIsolated` in the deployed tab was verified in Chrome 156 during F4: it is `true`, so the WebContainers runtime can boot there.
 - **Browser model catalogs and providers (production build, local `vite preview`, real Chromium) — historical, partially superseded by F1 above:**
   - `llm7`: catalog **200 / 86 models**. Tests probe up to three of the provider's own chat models: `gemini-3-flash` → **401 needs key**, `gemini-3.0-pro-image` and `gemini-3.1-flash-image` → **400 no tools**. `gemma-3-27b` probed **400 "does not support tools"** and is marked reply-only. `gpt-oss:20b` probed **200 OK with tools** and became the selected model (`health: ok`).
   - `kilo-free`: catalog fails in the browser (`net::ERR_FAILED`, then `ERR_BLOCKED_BY_RESPONSE.NotSameOrigin`; DevTools reports no `Access-Control-Allow-Origin`). The app labels it "Cannot reach the service from your network" because both the CORS and `no-cors` probes are blocked by the browser; after two failures it starts a 30s cooldown (countdown shown) instead of retrying continuously.
@@ -83,7 +101,7 @@ Not verified / still missing:
 - **A successful streamed reply is still unverified in the browser.** Streaming itself is covered by unit tests against recorded SSE, and the direct tiny requests returned 200, but LLM7's free allowance rejected the full agent payload with 429 and no paid key was available. The 429 shows up as a model error card, and the generic Retry button now re-sends the last user message.
 - **The Playwright screenshot suite exists (`tests/visual/floating.spec.ts`, `npm run test:visual`) but was not executed here**: the browser download did not finish on this runner. The same screenshots were taken through the cloud browser instead (`artifacts/visual/publish-{dark,light,alpine,dune,ember}.png`, `model-sheet-mobile.png`) and inspected: menus are opaque `rgb(...)` (no alpha), sized 250px under the Publish button, and the phone model picker is a 390px bottom sheet with a drag handle; dragging it down closed it.
 - **Auth bridge / Firebase sign-in is not implemented.** There is no `/auth-bridge.html`, no Firebase SDK, and no login screen. The UI runs as a single local profile. `SETUP.md` documents what the owner must add.
-- **WebContainers runtime is not implemented.** `RuntimeBanner` detects the missing cross-origin isolation (`SharedArrayBuffer`) and shows the limited-mode banner. The system prompt tells the model there is no runtime. Commands/terminal/preview remain UI-only.
+- **WebContainers runtime:** implemented in F4 for isolated pages (see the F4 section). On non-isolated pages `RuntimeBanner` still reports limited mode and the terminal/no-runtime path stays active.
 - **The development preview (`*.style.dev`) is not cross-origin isolated**, so it will always show the limited banner.
 - **Git, GitHub REST, MCP, integrations, skills execution and OAuth are not implemented.** The panel remains a UI mock for those areas.
 - **The live agent uses an in-memory project FS** seeded from the mock file contents, per session. Edits do not persist to OPFS and are lost on reload.

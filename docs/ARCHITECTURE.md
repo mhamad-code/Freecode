@@ -7,6 +7,7 @@ UI (React) ──► store.send ──► lib/agentClient.local.ts ──► eng
                                    │
                                    ├─ engine/providers/registry.ts ─► SSE parser ─► adapters
                                    ├─ engine/agent/tools/*  ─► storage/projectFs (OPFS | IDB | memory)
+├─ runtime/*  ─► WebContainer (lazy) ─► jsh shell + static preview server
                                    ├─ engine/agent/permissions.ts + checkpoints.ts
                                    └─ storage/vault.ts (AES-GCM keys)
 ```
@@ -43,7 +44,12 @@ UI (React) ──► store.send ──► lib/agentClient.local.ts ──► eng
 | `src/lib/brandLogos.ts` | `simple-icons` marks keyed by our integration/provider ids, their brand hex, and `NO_BRAND_LOGO` for the brands the package does not ship. |
 | `src/components/ServiceLogo.tsx` | `BrandGlyph`, the integrations `ServiceTile` and the provider `ProviderMark`; monogram/generic fallback when no mark exists. |
 | `src/components/CodeEditor.tsx` | CodeMirror 6 editor + `@codemirror/merge` compare view. Reached only through `lazy()` from `ToolPane`. |
-| `src/components/XTerm.tsx` | xterm.js terminal surface (renderer only; no shell yet), themed from the live CSS variables. Lazy chunk. |
+| `src/components/XTerm.tsx` | xterm.js terminal surface, themed from the live CSS variables. With cross-origin isolation it is wired to the container shell; otherwise it echoes and answers with the honest no-runtime line. Lazy chunk. |
+| `src/runtime/webcontainer.ts` | Capability check (`runtimeSupport`), the single lazy `import('@webcontainer/api')` and `WebContainer.boot({ coep: 'credentialless' })`. |
+| `src/runtime/workspace.ts` | Converts the flat `path → contents` map into a `FileSystemTree`, mounts it into the container, and writes editor saves through (`syncFile`). |
+| `src/runtime/terminal.ts` | Bridges an xterm surface to `container.spawn('jsh')`: input, output stream and resize. |
+| `src/runtime/previewServer.ts` / `preview.ts` | The static server written into `.freecode/preview-server.cjs` and the runner that waits for the `server-ready` event on port 5173. |
+| `src/runtime/state.ts` / `index.ts` | External store for boot/preview state and the public runtime facade used by the panels. |
 
 ## Provider contract
 

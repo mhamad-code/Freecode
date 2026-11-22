@@ -31,6 +31,7 @@ import { translate } from './lib/i18n';
 import { isMockMode } from './lib/modelCatalog';
 import type { PermissionMode } from './engine/agent/permissions';
 import { ERROR_HINT, ProviderError } from './engine/providers/errors';
+import { syncFile } from './runtime/workspace';
 
 export interface Settings {
   advancedMode: boolean;
@@ -455,6 +456,7 @@ export const useStore = create<AppStore>((set, get) => ({
         }
         return [...nodes, { name, path: full, type: 'dir', children: insert([], depth + 1) }];
       };
+      void syncFile(path, s.fileContents[path] ?? '');
       return {
         files: insert(s.files, 0),
         fileContents: { ...s.fileContents, [path]: s.fileContents[path] ?? '' },
@@ -471,6 +473,7 @@ export const useStore = create<AppStore>((set, get) => ({
               ? { ...n, children: walk(n.children) }
               : n,
         );
+      void syncFile(path, content);
       return { fileContents: { ...s.fileContents, [path]: content }, files: walk(s.files) };
     }),
 

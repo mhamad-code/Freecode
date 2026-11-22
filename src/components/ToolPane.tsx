@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../store';
 import { useI18n } from '../lib/i18n';
+import { runtimeSupport, startPreviewWithRuntime, useRuntime } from '../runtime';
 import type { ChangedFile, FileNode, ToolTab } from '../lib/types';
 import {
   Badge,
@@ -468,7 +469,20 @@ function BrowserPanel() {
 /* ================================ preview ================================ */
 function PreviewPanel() {
   const { t } = useI18n();
+  const runtime = useRuntime();
+  const files = useStore((s) => s.fileContents);
   const [device, setDevice] = useState<'phone' | 'tablet' | 'desktop'>('phone');
+  const [reloadKey, setReloadKey] = useState(0);
+  const supported = runtimeSupport() === 'full';
+  const busy = runtime.phase === 'booting' || runtime.previewPhase === 'starting';
+  const running = runtime.previewPhase === 'running' && Boolean(runtime.previewUrl);
+
+  const start = () => {
+    void startPreviewWithRuntime(files).catch(() => {
+      // the runtime state carries the failure message
+    });
+  };
+
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center gap-2 px-3 h-11 border-b border-[var(--line)]">
@@ -481,30 +495,68 @@ function PreviewPanel() {
             { value: 'desktop', label: 'Desktop' },
           ]}
         />
-        <Badge tone="accent" dot>localhost:5173</Badge>
-        <Btn size="sm" variant="outline" className="ms-auto" onClick={() => useStore.getState().toast('Element sent to composer')}>
-          {t('chat.edit')} element
-        </Btn>
+        <Badge tone={running ? 'accent' : 'info'} dot={running}>localhost:5173</Badge>
+        <div className="ms-auto flex items-center gap-1.5">
+          {running ? (
+            <IBtn label={t('preview.reload')} onClick={() => setReloadKey((k) => k + 1)}>
+              <RotateCw size={16} />
+            </IBtn>
+          ) : null}
+          {supported ? (
+            <Btn size="sm" variant="outline" disabled={busy} onClick={start}>
+              {busy ? t('runtime.previewStarting') : t('runtime.startPreview')}
+            </Btn>
+          ) : null}
+        </div>
       </div>
       <div className="flex-1 grid place-items-center p-4 overflow-auto" style={{ background: 'var(--bg)' }}>
-        <div
-          className="overflow-hidden"
-          style={{
-            width: device === 'phone' ? 320 : device === 'tablet' ? 520 : '100%',
-            maxWidth: '100%',
-            height: device === 'phone' ? 620 : 560,
-            border: '8px solid var(--line-strong)',
-            borderRadius: device === 'phone' ? 28 : 14,
-            background: 'var(--panel)',
-          }}
-        >
-          <div className="h-full overflow-auto p-5">
-            <div className="text-[11px] uppercase tracking-widest text-[var(--faint)]">Live preview</div>
-            <h3 className="text-[24px] font-bold mt-2">Your app, reloading as the agent edits.</h3>
-            <p className="text-[14px] text-[var(--muted)] mt-2">This frame reloads automatically after each file change.</p>
-            <div className="mt-4 h-28 rounded-xl" style={{ background: 'linear-gradient(135deg, var(--accent), transparent)' }} />
+        {running ? (
+          <div
+            className="overflow-hidden"
+            style={{
+              width: device === 'phone' ? 320 : device === 'tablet' ? 520 : '100%',
+              maxWidth: '100%',
+              height: device === 'phone' ? 620 : 560,
+              border: '8px solid var(--line-strong)',
+              borderRadius: device === 'phone' ? 28 : 14,
+              background: 'var(--panel)',
+            }}
+          >
+            <iframe
+              key={reloadKey}
+              title={t('launcher.preview')}
+              src={runtime.previewUrl ?? 'about:blank'}
+              className="w-full h-full"
+              style={{ border: 0, background: 'var(--panel)' }}
+            />
           </div>
-        </div>
+        ) : (
+          <div className="text-center max-w-[360px]">
+            <Globe size={34} strokeWidth={1.5} className="mx-auto text-[var(--faint)]" />
+            <div className="text-[18px] font-semibold mt-3">
+              {supported ? t('runtime.previewTitle') : t('runtime.previewUnsupportedTitle')}
+            </div>
+            <p className="text-[13.5px] text-[var(--muted)] mt-1.5">
+              {supported ? t('runtime.previewNothing') : t('runtime.previewUnsupported')}
+            </p>
+            {runtime.previewError ? (
+              <p className="text-[12.5px] mt-2 break-words" style={{ color: 'var(--danger)' }} dir="ltr">
+                {runtime.previewError}
+              </p>
+            ) : null}
+            {runtime.phase === 'error' && runtime.error ? (
+              <p className="text-[12.5px] mt-2 break-words" style={{ color: 'var(--danger)' }} dir="ltr">
+                {runtime.error}
+              </p>
+            ) : null}
+            {supported ? (
+              <Btn variant="primary" className="mt-4" disabled={busy} onClick={start}>
+                {busy ? t('runtime.previewStarting') : t('runtime.startPreview')}
+              </Btn>
+            ) : null}
+            <p className="text-[12px] text-[var(--faint)] mt-3">{t('runtime.previewNote')}</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -550,7 +602,14 @@ export function TerminalPanel({ compact }: { compact?: boolean }) {
             </div>
           }
         >
-          <XTerm prompt="~/project $" banner={t('terminal.banner')} noRuntime={t('terminal.noRuntime')} />
+          <XTerm
+            prompt="~/project $"
+            banner={t('terminal.banner')}
+            noRuntime={t('terminal.noRuntime')}
+            shell={runtimeSupport() === 'full'}
+            starting={t('runtime.shellStarting')}
+            failed={t('runtime.shellFailed')}
+          />
         </Suspense>
       </div>
     </div>
