@@ -59,7 +59,7 @@ export default function Sites() {
         />
         <div className="flex flex-wrap gap-2 mt-3">
           {[t('sites.landing'), t('sites.stores'), t('sites.dashboards'), t('sites.portfolios'), t('sites.docs')].map((k) => (
-            <Chip key={k} className="h-7 text-[12.5px]">
+            <Chip key={k} className="h-7 text-[12.5px]" onClick={() => setDescribe((v) => (v ? `${v} ${k}` : k))}>
               {k}
             </Chip>
           ))}
@@ -71,7 +71,8 @@ export default function Sites() {
             onClick={() => {
               setCreate(false);
               newSession();
-              toast(t('sites.creating'));
+              useStore.getState().send(describe.trim());
+              setDescribe('');
             }}
           >
             {t('sites.createWithAgent')}

@@ -42,6 +42,7 @@ import clsx from 'clsx';
 import { useStore } from '../store';
 import { useI18n } from '../lib/i18n';
 import { THEMES } from '../themes/registry';
+import { buildFilesZip, downloadArchive } from '../lib/archive';
 import { Btn, IBtn, Kbd, Logo, Menu, MenuItem, Segmented, Tip } from './ui';
 
 /* ------------------------------- top bar ------------------------------- */
@@ -170,7 +171,6 @@ export function Rail() {
   const navigate = useNavigate();
   const location = useLocation();
   const streak = useStore((s) => s.usage.streak);
-  const setDrawer = useStore((s) => s.setDrawer);
   const setTheme = useStore((s) => s.setTheme);
   const themeId = useStore((s) => s.themeId);
   const lang = useStore((s) => s.lang);
@@ -209,7 +209,7 @@ export function Rail() {
           align="start"
           trigger={
             <Tip label={t('nav.rewards')}>
-              <IBtn label={t('nav.rewards')} onClick={() => setDrawer(true)}>
+              <IBtn label={t('nav.rewards')}>
                 <Gift size={22} />
               </IBtn>
             </Tip>
@@ -217,13 +217,13 @@ export function Rail() {
         >
           <div className="px-2 py-1">
             <div className="text-[15px] font-semibold px-1 py-1">{t('share.title')}</div>
-            <MenuItem icon={<Copy size={16} />} onClick={() => { void navigator.clipboard?.writeText(window.location.origin); useStore.getState().toast('Link copied'); }}>
+            <MenuItem icon={<Copy size={16} />} onClick={() => { void navigator.clipboard?.writeText(window.location.origin); useStore.getState().toast(t('share.linkCopied')); }}>
               {t('share.copyLink')}
             </MenuItem>
-            <MenuItem icon={<Bug size={16} />} onClick={() => useStore.getState().toast('Report issue')}>
+            <MenuItem disabled reason={t('help.reportUnavailable')} icon={<Bug size={16} />}>
               {t('share.report')}
             </MenuItem>
-            <MenuItem icon={<Sparkles size={16} />} onClick={() => useStore.getState().toast('What is new')}>
+            <MenuItem disabled reason={t('share.whatsNewUnavailable')} icon={<Sparkles size={16} />}>
               {t('share.whatsNew')}
             </MenuItem>
             <div className="flex items-center gap-2 mt-2 px-1 text-[13.5px] text-[var(--muted)]">
@@ -242,13 +242,13 @@ export function Rail() {
             </IBtn>
           }
         >
-          <MenuItem icon={<BookOpen size={16} />}>Docs</MenuItem>
-          <MenuItem icon={<Keyboard size={16} />} shortcut="?">
+          <MenuItem disabled reason={t('help.docsUnavailable')} icon={<BookOpen size={16} />}>Docs</MenuItem>
+          <MenuItem icon={<Keyboard size={16} />} shortcut="?" onClick={() => navigate('/settings/keyboard')}>
             Shortcuts
           </MenuItem>
-          <MenuItem icon={<Bug size={16} />}>Report issue</MenuItem>
-          <MenuItem icon={<Sparkles size={16} />}>What&apos;s new</MenuItem>
-          <MenuItem icon={<MessageCircle size={16} />}>Discord</MenuItem>
+          <MenuItem disabled reason={t('help.reportUnavailable')} icon={<Bug size={16} />}>Report issue</MenuItem>
+          <MenuItem disabled reason={t('share.whatsNewUnavailable')} icon={<Sparkles size={16} />}>What&apos;s new</MenuItem>
+          <MenuItem disabled reason={t('help.discordUnavailable')} icon={<MessageCircle size={16} />}>Discord</MenuItem>
         </Menu>
         <Menu
           width={250}
@@ -308,7 +308,7 @@ export function Rail() {
               ))}
             </div>
           </div>
-          <MenuItem icon={<LogOut size={16} />} danger>
+          <MenuItem icon={<LogOut size={16} />} danger disabled reason={t('account.signOutUnavailable')}>
             {t('account.signOut')}
           </MenuItem>
         </Menu>
@@ -365,7 +365,7 @@ export function Drawer() {
 
         <div className="flex flex-col px-2">
           <DrawerRow icon={<SquarePen size={20} />} label={t('drawer.newChat')} onClick={() => { newSession(); navigate('/'); }} />
-          <DrawerRow icon={<FolderPlus size={20} />} label={t('drawer.newProject')} onClick={() => useStore.getState().toast('New project')} />
+          <DrawerRow icon={<FolderPlus size={20} />} label={t('drawer.newProject')} disabled reason={t('drawer.newProjectUnavailable')} />
         </div>
 
         <div className="px-3 pt-3">
@@ -380,7 +380,7 @@ export function Drawer() {
               <ChevronDown size={15} style={{ transform: projectsOpen ? undefined : 'rotate(-90deg)', transition: 'transform .18s' }} />
             </button>
             <div className="ms-auto flex items-center gap-1">
-              <IBtn label={t('drawer.newProject')} className="w-7 h-7" onClick={() => useStore.getState().toast('New project')}>
+              <IBtn label={t('drawer.newProject')} className="w-7 h-7" disabled title={t('drawer.newProjectUnavailable')}>
                 <FolderPlus size={16} />
               </IBtn>
             </div>
@@ -416,7 +416,9 @@ export function Drawer() {
               >
                 <span className="w-1.5 h-1.5 rounded-full flex-none" style={{ background: s.status === 'running' ? 'var(--accent)' : 'transparent' }} />
                 <span className="truncate flex-1">{s.title === 'New chat' ? t('tab.newChat') : s.title}</span>
-                <span className="text-[12px] text-[var(--faint)] flex-none">2m</span>
+                <span className="text-[12px] text-[var(--faint)] flex-none">
+                  {new Date(s.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
               </button>
             ))}
           </div>
@@ -426,7 +428,7 @@ export function Drawer() {
           <button
             type="button"
             className="flex items-center gap-2 text-[15px]"
-            onClick={() => { void navigator.clipboard?.writeText(window.location.origin); useStore.getState().toast('Link copied'); }}
+            onClick={() => { void navigator.clipboard?.writeText(window.location.origin); useStore.getState().toast(t('share.linkCopied')); }}
           >
             <Gift size={18} />
             <span>{t('drawer.share')}</span>
@@ -450,12 +452,14 @@ export function Drawer() {
   );
 }
 
-function DrawerRow({ icon, label, trailing, onClick }: { icon: ReactNode; label: string; trailing?: ReactNode; onClick?: () => void }) {
+function DrawerRow({ icon, label, trailing, onClick, disabled, reason }: { icon: ReactNode; label: string; trailing?: ReactNode; onClick?: () => void; disabled?: boolean; reason?: string }) {
   return (
     <button
       type="button"
-      onClick={onClick}
-      className="flex items-center gap-2.5 h-11 px-2 rounded-[10px] text-[16px] text-start hover:bg-[var(--hover)]"
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      title={disabled ? reason : undefined}
+      className="flex items-center gap-2.5 h-11 px-2 rounded-[10px] text-[16px] text-start hover:bg-[var(--hover)] disabled:opacity-45 disabled:cursor-not-allowed disabled:hover:bg-transparent"
     >
       <span className="text-[var(--muted)] flex none">{icon}</span>
       <span className="flex-1 truncate">{label}</span>
@@ -516,16 +520,23 @@ export function PanelToolbar({ showPublish = true }: { showPublish?: boolean }) 
               </Btn>
             }
           >
-            <MenuItem icon={<Files size={16} />} onClick={() => toast('Downloading project…')}>
+            <MenuItem
+              icon={<Files size={16} />}
+              onClick={() => {
+                const files = useStore.getState().fileContents;
+                downloadArchive('freecode-project.zip', buildFilesZip(files));
+                toast(t('toolbar.zipReady'));
+              }}
+            >
               {t('toolbar.downloadProject')}
             </MenuItem>
-            <MenuItem icon={<Files size={16} />} onClick={() => toast('Building…')}>
+            <MenuItem disabled reason={t('toolbar.buildUnavailable')} icon={<Files size={16} />}>
               {t('toolbar.downloadBuild')}
             </MenuItem>
-            <MenuItem icon={<ArrowUpRight size={16} />} onClick={() => toast('Push to GitHub needs a connection')}>
+            <MenuItem disabled reason={t('toolbar.githubUnavailable')} icon={<ArrowUpRight size={16} />}>
               {t('toolbar.push')}
             </MenuItem>
-            <MenuItem icon={<Settings2 size={16} />} onClick={() => toast('Deploy is coming soon')}>
+            <MenuItem disabled reason={t('toolbar.deployUnavailable')} icon={<Settings2 size={16} />}>
               {t('toolbar.deploySoon')}
             </MenuItem>
           </Menu>
@@ -552,6 +563,7 @@ export function CommandPalette() {
   const setActive = useStore((s) => s.setActiveSession);
   const newSession = useStore((s) => s.newSession);
   const setTheme = useStore((s) => s.setTheme);
+  const projectFiles = useStore((s) => s.files);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -577,13 +589,17 @@ export function CommandPalette() {
       icon: <MessageCircle size={17} />,
       run: () => { setActive(s.id); navigate('/'); },
     }));
-    const files: PaletteItem[] = ['src/routes/chat.tsx', 'src/routes/cli.tsx', 'vite.config.ts', 'src/styles.css', 'package.json'].map((f) => ({
-      id: `f-${f}`,
-      group: t('palette.files'),
-      label: f,
-      icon: <Files size={17} />,
-      run: () => { openTool('editor', f); navigate('/'); },
-    }));
+    const flatten = (nodes: typeof projectFiles): string[] =>
+      nodes.flatMap((node) => (node.type === 'dir' ? flatten(node.children ?? []) : [node.path]));
+    const files: PaletteItem[] = flatten(projectFiles)
+      .slice(0, 100)
+      .map((f) => ({
+        id: `f-${f}`,
+        group: t('palette.files'),
+        label: f,
+        icon: <Files size={17} />,
+        run: () => { openTool('editor', f); navigate('/'); },
+      }));
     const settings: PaletteItem[] = ['general', 'appearance', 'usage', 'skills', 'project', 'keyboard'].map((s) => ({
       id: `st-${s}`,
       group: t('palette.settings'),
@@ -592,7 +608,7 @@ export function CommandPalette() {
       run: () => navigate(`/settings/${s}`),
     }));
     return [...actions, ...sess, ...files, ...settings];
-  }, [dockOpen, navigate, newSession, openTool, sessions, setActive, setDockOpen, setTheme, t]);
+  }, [dockOpen, navigate, newSession, openTool, projectFiles, sessions, setActive, setDockOpen, setTheme, t]);
 
   const filtered = items.filter((i) => i.label.toLowerCase().includes(q.replace(/^[>@#/]/, '').toLowerCase()));
   useEffect(() => setIdx(0), [q]);

@@ -127,6 +127,16 @@ export function readArchive(bytes: Uint8Array): Archive {
   };
 }
 
+/** A plain ZIP of the project files, with no chats or settings. */
+export function buildFilesZip(files: Record<string, string>): Uint8Array {
+  const entries: Record<string, Uint8Array> = {};
+  for (const [path, contents] of Object.entries(files)) {
+    const safe = archivePath(path);
+    if (safe) entries[safe] = strToU8(contents);
+  }
+  return zipSync(entries, { level: 6 });
+}
+
 export function archiveName(date = new Date()): string {
   return `freecode-${date.toISOString().slice(0, 10)}${ARCHIVE_EXTENSION}`;
 }

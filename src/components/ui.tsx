@@ -309,12 +309,17 @@ export function MenuItem({
   icon,
   shortcut,
   danger,
+  disabled,
+  reason,
   children,
   onClick,
 }: {
   icon?: ReactNode;
   shortcut?: string;
   danger?: boolean;
+  disabled?: boolean;
+  /** Shown as a tooltip; required for a disabled item so nothing is silent. */
+  reason?: string;
   children: ReactNode;
   onClick?: () => void;
 }) {
@@ -322,12 +327,18 @@ export function MenuItem({
     <button
       type="button"
       role="menuitem"
-      onClick={onClick}
-      className="w-full flex items-center gap-2.5 px-2.5 h-10 rounded-[9px] text-[15px] text-start hover:bg-[var(--hover)]"
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      aria-disabled={disabled || undefined}
+      title={disabled ? reason : undefined}
+      className="w-full flex items-center gap-2.5 px-2.5 min-h-10 py-1.5 rounded-[9px] text-[15px] text-start hover:bg-[var(--hover)] disabled:opacity-45 disabled:cursor-not-allowed disabled:hover:bg-transparent"
       style={danger ? { color: 'var(--danger)' } : undefined}
     >
       {icon ? <span className="text-[var(--muted)] flex none">{icon}</span> : null}
-      <span className="flex-1 truncate">{children}</span>
+      <span className="flex-1 min-w-0 text-start">
+        <span className="block truncate">{children}</span>
+        {disabled && reason ? <span className="block text-[11.5px] text-[var(--faint)] whitespace-normal leading-snug">{reason}</span> : null}
+      </span>
       {shortcut ? <Kbd>{shortcut}</Kbd> : null}
     </button>
   );

@@ -21,6 +21,7 @@ export interface ProfileSnapshot {
   sessions: Session[];
   files: FileNode[];
   fileContents: Record<string, string>;
+  binaryFiles?: Record<string, { size: number; type: string; data: string }>;
   checkpoints: Checkpoint[];
 }
 
@@ -29,6 +30,7 @@ export interface SnapshotSource {
   sessions: Session[];
   files: FileNode[];
   fileContents: Record<string, string>;
+  binaryFiles?: Record<string, { size: number; type: string; data: string }>;
 }
 
 export function buildSnapshot(source: SnapshotSource): ProfileSnapshot {
@@ -39,6 +41,7 @@ export function buildSnapshot(source: SnapshotSource): ProfileSnapshot {
     sessions: source.sessions,
     files: source.files,
     fileContents: source.fileContents,
+    binaryFiles: source.binaryFiles,
     checkpoints: exportCheckpoints(),
   };
 }
@@ -107,6 +110,9 @@ export async function loadProfile(db: KeyValueDB): Promise<ProfileSnapshot | und
     sessions: normalizeSessions(stored.sessions),
     files: Array.isArray(stored.files) ? stored.files : [],
     fileContents: isRecord(stored.fileContents) ? (stored.fileContents as Record<string, string>) : {},
+    binaryFiles: isRecord(stored.binaryFiles)
+      ? (stored.binaryFiles as Record<string, { size: number; type: string; data: string }>)
+      : undefined,
     checkpoints: Array.isArray(stored.checkpoints)
       ? stored.checkpoints.filter(isCheckpoint)
       : [],
@@ -118,6 +124,7 @@ export interface SnapshotPayload {
   activeSessionId?: string;
   files?: FileNode[];
   fileContents?: Record<string, string>;
+  binaryFiles?: Record<string, { size: number; type: string; data: string }>;
   checkpoints?: Checkpoint[];
   settings?: Partial<Settings>;
 }
@@ -132,6 +139,7 @@ export function applySnapshot(payload: SnapshotPayload): void {
     activeSessionId: payload.activeSessionId,
     files: payload.files,
     fileContents: payload.fileContents,
+    binaryFiles: payload.binaryFiles,
     settings: payload.settings,
   });
 }

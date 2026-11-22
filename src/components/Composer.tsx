@@ -6,7 +6,6 @@ import {
   Check,
   ChevronDown,
   FilePlus,
-  GitBranch,
   ImagePlus,
   Paperclip,
   Plus,
@@ -126,21 +125,54 @@ export function Composer() {
     el.style.height = `${Math.min(170, Math.max(66, el.scrollHeight))}px`;
   }, [text]);
 
-  useEffect(() => {
-    if (!dictating) return;
-    const phrase = t('chat.placeholder').split(' ');
-    let i = 0;
-    const id = window.setInterval(() => {
-      if (i >= phrase.length) {
-        setDictating(false);
-        window.clearInterval(id);
-        return;
+  const speech = useRef<{ stop: () => void } | null>(null);
+  const canDictate =
+    typeof window !== 'undefined' &&
+    Boolean(
+      (window as unknown as { SpeechRecognition?: unknown }).SpeechRecognition ||
+        (window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition,
+    );
+
+  useEffect(() => () => speech.current?.stop(), []);
+
+  const startDictation = () => {
+    const Ctor = ((window as unknown as { SpeechRecognition?: new () => unknown }).SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: new () => unknown }).webkitSpeechRecognition) as
+      | (new () => {
+          lang: string;
+          continuous: boolean;
+          interimResults: boolean;
+          onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>>; resultIndex: number }) => void) | null;
+          onend: (() => void) | null;
+          onerror: (() => void) | null;
+          start: () => void;
+          stop: () => void;
+        })
+      | undefined;
+    if (!Ctor) {
+      toast(t('composer.voiceUnavailable'));
+      return;
+    }
+    const recognition = new Ctor();
+    recognition.lang = useStore.getState().lang === 'ar' ? 'ar-SA' : 'en-US';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.onresult = (event) => {
+      let said = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        said += event.results[i][0]?.transcript ?? '';
       }
-      setText((v) => (v ? `${v} ${phrase[i]}` : phrase[i]));
-      i++;
-    }, 160);
-    return () => window.clearInterval(id);
-  }, [dictating, t]);
+      if (said.trim()) setText((v) => (v ? `${v} ${said.trim()}` : said.trim()));
+    };
+    recognition.onend = () => setDictating(false);
+    recognition.onerror = () => {
+      setDictating(false);
+      toast(t('composer.voiceUnavailable'));
+    };
+    speech.current = recognition;
+    setDictating(true);
+    recognition.start();
+  };
 
   const selectModel = async (model: CatalogModel) => {
     setModel(model.id);
@@ -357,11 +389,11 @@ export function Composer() {
                 </IBtn>
               }
             >
-              <MenuItem icon={<Paperclip size={16} />}>{t('composer.attach')}</MenuItem>
-              <MenuItem icon={<FilePlus size={16} />}>Add from project</MenuItem>
-              <MenuItem icon={<ImagePlus size={16} />}>Attach screenshot of browser</MenuItem>
-              <MenuItem icon={<Sparkles size={16} />}>Add MCP resource</MenuItem>
-              <MenuItem icon={<Wand2 size={16} />}>Take a snapshot</MenuItem>
+              <MenuItem disabled reason={t('composer.attachmentsUnavailable')} icon={<Paperclip size={16} />}>{t('composer.attach')}</MenuItem>
+              <MenuItem disabled reason={t('composer.attachmentsUnavailable')} icon={<FilePlus size={16} />}>Add from project</MenuItem>
+              <MenuItem disabled reason={t('composer.attachmentsUnavailable')} icon={<ImagePlus size={16} />}>Attach screenshot</MenuItem>
+              <MenuItem disabled reason={t('composer.attachmentsUnavailable')} icon={<Sparkles size={16} />}>Add MCP resource</MenuItem>
+              <MenuItem disabled reason={t('composer.attachmentsUnavailable')} icon={<Wand2 size={16} />}>Take a snapshot</MenuItem>
             </Menu>
 
             <Popover
@@ -493,10 +525,16 @@ export function Composer() {
                 style={{ borderRadius: 14 }}
               >
                 <div className="text-[14px] font-semibold">
-                  Context {usage.context}% used · {usage.tokens}k / 200k tokens
+                  Context {usage.context}% used · {usage.tokens}k tokens
                 </div>
                 <div className="text-[13px] text-[var(--muted)] mt-1">Cost this session ${usage.cost.toFixed(2)}</div>
-                <Btn size="sm" variant="outline" className="mt-2.5 w-full" onClick={() => setContextOpen(false)}>
+                <Btn
+                  size="sm"
+                  variant="outline"
+                  className="mt-2.5 w-full"
+                  disabled
+                  title={t('composer.compactUnavailable')}
+                >
                   {t('composer.compact')}
                 </Btn>
               </div>
@@ -519,27 +557,28 @@ export function Composer() {
                       <MenuItem key={p} onClick={() => useStore.getState().setSetting('permissionMode', p)}>{p}</MenuItem>
                     ))}
                   </Menu>
-                  <button type="button" className="chip h-8 gap-1.5 text-[13.5px]" aria-label="Branch">
-                    <GitBranch size={15} />
-                    main
-                  </button>
                 </>
               ) : null}
 
               <button
                 type="button"
                 aria-label={running ? t('chat.stop') : hasText ? t('chat.send') : t('chat.voice')}
+                disabled={!running && !hasText && !canDictate}
+                title={!running && !hasText && !canDictate ? t('composer.voiceUnavailable') : undefined}
                 onClick={() => {
                   if (running) stop();
                   else if (hasText) submit();
-                  else setDictating((d) => !d);
+                  else if (dictating) {
+                    speech.current?.stop();
+                    setDictating(false);
+                  } else startDictation();
                 }}
-                className={clsx('grid place-items-center flex-none relative')}
+                className={clsx('grid place-items-center flex-none relative disabled:opacity-40 disabled:cursor-not-allowed')}
                 style={{
                   width: 44,
                   height: 38,
                   borderRadius: 11,
-                  background: running ? 'var(--elevated)' : hasText ? 'var(--accent)' : 'var(--accent)',
+                  background: running ? 'var(--elevated)' : 'var(--accent)',
                   color: running ? 'var(--text)' : 'var(--accent-ink)',
                   boxShadow: `0 2px 0 ${running ? 'var(--edge)' : 'var(--accent-edge)'}`,
                   border: running ? '1.5px solid var(--line-strong)' : 'none',

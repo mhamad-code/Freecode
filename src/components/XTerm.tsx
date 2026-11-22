@@ -57,12 +57,16 @@ export interface XTermProps {
   starting: string;
   /** Printed if the container shell cannot start. */
   failed: string;
+  /** Project files mounted into the container before the shell starts. */
+  files?: Record<string, string>;
 }
 
-export default function XTerm({ prompt, banner, noRuntime, shell, starting, failed }: XTermProps) {
+export default function XTerm({ prompt, banner, noRuntime, shell, starting, failed, files }: XTermProps) {
   const host = useRef<HTMLDivElement>(null);
   const answer = useRef(noRuntime);
   answer.current = noRuntime;
+  const filesRef = useRef(files ?? {});
+  filesRef.current = files ?? {};
 
   useEffect(() => {
     if (!host.current) return;
@@ -87,7 +91,7 @@ export default function XTerm({ prompt, banner, noRuntime, shell, starting, fail
 
     if (shell) {
       term.writeln(starting);
-      attachShell(term)
+      attachShell(term, filesRef.current)
         .then((cleanup) => {
           if (disposed) {
             cleanup();

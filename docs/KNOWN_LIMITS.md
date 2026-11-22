@@ -108,6 +108,24 @@ Not verified / still missing:
 - **Persistence is one profile per device and browser.** Nothing is encrypted in IndexedDB (provider keys stay in the vault), opening two tabs writes the same snapshot, and the last tab to save wins — there is no multi-tab lock.
 - **The saved snapshot is written on a debounce (800 ms) and on `pagehide`.** A hard crash can lose the last moments of a turn. Sessions are stored whole, not incrementally, so very large histories will make each write heavier.
 
+## H — UI honesty pass (this build)
+
+Verified in this workspace:
+
+- `npx tsc -b` clean; `npx vitest run` **175/175**, including new tests for path validation (empty, `\`, control chars, `.`/`..`, empty segment, long names/paths, duplicates, file used as a folder) and for tree operations (empty folders survive, nested creation, rename rewrites descendants, delete removes only the target subtree).
+- `npm run build` now ends with `node scripts/check-bundle.mjs`; the guard fails on the old fake-page claims (`Cloud browser`, `The agent can open pages, click, type`, the rendered demo page, the mission banner) and on the removed demo data, in both `src/` and `dist/`.
+- Real Chromium (cloud browser, 390×844) against the production build served by `scripts/serve-dist.mjs` (`crossOriginIsolated === true`): inline new file with an empty-name error, `src/utils/a.ts` created and opened in CodeMirror, empty folder created and still present after a reload (snapshot in IndexedDB), Browser tab with no fake page and an external URL that opens a new tab plus the note, terminal `node -v` → `v24.22.2`, preview iframe rendering `index.html` and the edited text after Save + Reload. Screenshots: `docs/verification/ui-terminal.png`, `ui-preview.png`, `ui-preview-updated.png`.
+
+Not verified / still missing:
+
+- **Playwright was not executed.** `tests/visual/honesty.spec.ts` exists and the config now uses the full bundled Chromium, but `npx playwright install chromium` stalled after the download in this VM and the binary never appeared. The same interactions were exercised through the cloud browser by hand.
+- **No generic dead-click crawler.** The audit covered the screens listed in `docs/verification/ui-audit.md`, but not every control in every state; the session-tab context menu (reorder) is still missing.
+- **Uploads are capped and partly non-portable.** 512 kB per file, 4 MB per selection; binary files are stored as base64 in the profile (not in `.freecode` archives) and the agent does not see them. Folder upload depends on `webkitdirectory`.
+- **The preview still does not run the project.** It is a static server: `npm install`, `npm run dev` and framework builds are not executed. Creating `package.json` plus `index.html` and asking for a Vite dev server will show the static files, not the framework app.
+- **OAuth connections are still simulated.** The Integrations screen now says it only records the connection locally; token-based GitHub validation arrives with F7.
+- **Some copy is still hard-coded English** in older panels (e.g. a few Settings headings/labels). New strings in this pass are in both languages.
+- Compare view still diffs saved vs. working buffer only.
+
 ## F0 — demo data removal (this build)
 
 Verified in this workspace:

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Search } from 'lucide-react';
 import { useStore } from '../store';
 import { useI18n } from '../lib/i18n';
-import { Badge, Btn, Dialog, Input, PageTitle, SearchInput } from '../components/ui';
+import { Badge, Btn, Dialog, PageTitle, SearchInput } from '../components/ui';
 import { ServiceTile } from '../components/ServiceLogo';
 
 export default function Integrations() {
@@ -13,7 +13,6 @@ export default function Integrations() {
   const disconnect = useStore((s) => s.disconnectAccount);
   const toast = useStore((s) => s.toast);
   const [query, setQuery] = useState('');
-  const [custom, setCustom] = useState(false);
   const [confirm, setConfirm] = useState<{ service: string; account: string; name: string } | null>(null);
 
   const connected = integrations.filter((i) => i.accounts.length > 0);
@@ -28,9 +27,10 @@ export default function Integrations() {
 
         <div className="flex items-center gap-2">
           <SearchInput value={query} onValueChange={setQuery} placeholder={t('integrations.explore')} className="flex-1" />
-          <Btn variant="inverse" onClick={() => setCustom(true)}>{t('integrations.custom')}</Btn>
+          <Btn variant="inverse" disabled title={t('integrations.customUnavailable')}>{t('integrations.custom')}</Btn>
         </div>
 
+        <p className="card mt-4 p-3 text-[13px] text-[var(--muted)]">{t('integrations.localOnly')}</p>
         <div className="mt-5 text-[15px] text-[var(--muted)]">{t('integrations.connected')}</div>
         <div className="mt-2 flex flex-col gap-3">
           {connected.length === 0 ? (
@@ -93,7 +93,7 @@ export default function Integrations() {
             </button>
           ))}
           {!popular.length ? (
-            <button type="button" className="card flex items-center gap-3 p-3 text-start" onClick={() => toast('Integration request sent')}>
+            <button type="button" className="card flex items-center gap-3 p-3 text-start opacity-60" disabled title={t('integrations.requestUnavailable')}>
               <span className="w-[52px] h-[52px] rounded-xl grid place-items-center" style={{ border: '1.5px dashed var(--line-strong)' }}>
                 <Search size={20} className="text-[var(--faint)]" />
               </span>
@@ -105,31 +105,6 @@ export default function Integrations() {
           ) : null}
         </div>
       </div>
-
-      <Dialog open={custom} onClose={() => setCustom(false)} title={`Add custom integration`} width={480}>
-        <div className="flex flex-col gap-3">
-          <div>
-            <label className="text-[13.5px] text-[var(--muted)]">Name</label>
-            <Input value="" onValueChange={() => {}} placeholder="My internal tool" className="mt-1" />
-          </div>
-          <div>
-            <label className="text-[13.5px] text-[var(--muted)]">MCP or HTTP URL</label>
-            <Input value="" onValueChange={() => {}} placeholder="https://mcp.example.com/sse" className="mt-1" />
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-[14px]">Auth type</span>
-            <Btn size="sm" variant="outline">Bearer token</Btn>
-          </div>
-          <div>
-            <label className="text-[13.5px] text-[var(--muted)]">Headers</label>
-            <textarea className="area mt-1 font-mono text-[13px]" rows={3} placeholder={'Authorization: Bearer …'} dir="ltr" />
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 mt-4">
-          <Btn variant="ghost" onClick={() => setCustom(false)}>{t('common.cancel')}</Btn>
-          <Btn variant="primary" onClick={() => { setCustom(false); toast('Custom integration added'); }}>{t('common.add')}</Btn>
-        </div>
-      </Dialog>
 
       <Dialog
         open={Boolean(confirm)}

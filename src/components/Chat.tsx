@@ -10,15 +10,12 @@ import {
   Copy,
   File,
   FilePen,
-  MessageSquare,
   Pencil,
   Plug,
   Shield,
   Sparkles,
   Square,
   SquareTerminal,
-  ThumbsDown,
-  ThumbsUp,
   Undo2,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -26,7 +23,7 @@ import { useStore } from '../store';
 import type { AssistantTurn, Group, Message, Permission, ToolKind } from '../lib/types';
 import { useI18n } from '../lib/i18n';
 import { diffContents, getCheckpoint } from '../lib/checkpoints';
-import { Badge, Btn, Dialog, Logo, Progress, Tip, fmtDur, useNow } from './ui';
+import { Badge, Btn, Dialog, Logo, Tip, fmtDur, useNow } from './ui';
 
 /* ------------------------------ markdown ------------------------------ */
 const inline = (text: string): ReactNode[] => {
@@ -453,38 +450,11 @@ function ErrorBlock({ turn }: { turn: AssistantTurn }) {
   );
 }
 
-function ReactionRow({ text, onComment }: { text: string; onComment: () => void }) {
+function ReactionRow({ text }: { text: string }) {
   const { t } = useI18n();
-  const [vote, setVote] = useState<'up' | 'down' | null>(null);
-  const [badOpen, setBadOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex items-center gap-1 mt-3 text-[var(--muted)]">
-      <Tip label={t('chat.edit')} side="top">
-        <button type="button" onClick={onComment} className="w-8 h-8 grid place-items-center rounded-lg hover:bg-[var(--hover)]">
-          <MessageSquare size={19} />
-        </button>
-      </Tip>
-      <Tip label="Good response" side="top">
-        <button
-          type="button"
-          onClick={() => setVote(vote === 'up' ? null : 'up')}
-          className="w-8 h-8 grid place-items-center rounded-lg hover:bg-[var(--hover)]"
-          style={vote === 'up' ? { color: 'var(--accent)' } : undefined}
-        >
-          <ThumbsUp size={19} fill={vote === 'up' ? 'currentColor' : 'none'} />
-        </button>
-      </Tip>
-      <Tip label="Bad response" side="top">
-        <button
-          type="button"
-          onClick={() => { setVote('down'); setBadOpen(true); }}
-          className="w-8 h-8 grid place-items-center rounded-lg hover:bg-[var(--hover)]"
-          style={vote === 'down' ? { color: 'var(--danger)' } : undefined}
-        >
-          <ThumbsDown size={19} fill={vote === 'down' ? 'currentColor' : 'none'} />
-        </button>
-      </Tip>
       <Tip label={copied ? t('chat.copied') : t('chat.copy')} side="top">
         <button
           type="button"
@@ -494,22 +464,11 @@ function ReactionRow({ text, onComment }: { text: string; onComment: () => void 
           {copied ? <Check size={19} /> : <Copy size={19} />}
         </button>
       </Tip>
-      <Dialog open={badOpen} onClose={() => setBadOpen(false)} title="What went wrong?" width={400}>
-        <div className="flex flex-wrap gap-2">
-          {['Incorrect', 'Incomplete', 'Too slow', 'Other'].map((r) => (
-            <button key={r} type="button" className="chip" onClick={() => setBadOpen(false)}>{r}</button>
-          ))}
-        </div>
-        <textarea className="area mt-3" rows={3} placeholder="Tell us more (optional)" />
-        <div className="flex justify-end mt-3">
-          <Btn variant="primary" size="sm" onClick={() => setBadOpen(false)}>{t('common.save')}</Btn>
-        </div>
-      </Dialog>
     </div>
   );
 }
 
-function AssistantMessage({ turn, onComment }: { turn: AssistantTurn; onComment: () => void }) {
+function AssistantMessage({ turn }: { turn: AssistantTurn }) {
   const { t } = useI18n();
   const toggle = useStore((s) => s.toggleTurn);
   const send = useStore((s) => s.send);
@@ -589,7 +548,7 @@ function AssistantMessage({ turn, onComment }: { turn: AssistantTurn; onComment:
               ))}
             </div>
           ) : null}
-          <ReactionRow text={turn.final} onComment={onComment} />
+          <ReactionRow text={turn.final} />
         </>
       ) : null}
       {turn.running && !(turn.permission && !turn.permission.decision) ? (
@@ -609,7 +568,8 @@ function UserMessage({ msg }: { msg: Message & { kind: 'user' } }) {
   const [value, setValue] = useState(msg.text);
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
-  const setDraft = useStore((s) => s.setDraft);
+  const resend = useStore((s) => s.resendFromMessage);
+  const truncate = useStore((s) => s.truncateFromMessage);
   const toast = useStore((s) => s.toast);
   const long = msg.text.split('\n').length > 8;
 
@@ -634,7 +594,20 @@ function UserMessage({ msg }: { msg: Message & { kind: 'user' } }) {
             <textarea className="area" rows={3} value={value} onChange={(e) => setValue(e.target.value)} autoFocus />
             <div className="flex justify-end gap-2 mt-2">
               <Btn size="sm" variant="ghost" onClick={() => { setEditing(false); setValue(msg.text); }}>{t('common.cancel')}</Btn>
-              <Btn size="sm" variant="primary" onClick={() => { setEditing(false); toast('Conversation forked from this point', 'Undo'); }}>{t('common.save')}</Btn>
+              <Btn
+                size="sm"
+                variant="primary"
+                onClick={() => {
+                  const next = value.trim();
+                  setEditing(false);
+                  if (!next) return;
+                  if (next === msg.text) return;
+                  resend(msg.id, next);
+                  toast(t('chat.forked'));
+                }}
+              >
+                {t('common.save')}
+              </Btn>
             </div>
           </div>
         ) : (
@@ -653,7 +626,10 @@ function UserMessage({ msg }: { msg: Message & { kind: 'user' } }) {
           </button>
         </Tip>
         <Tip label={t('chat.restoreHere')} side="top">
-          <button type="button" aria-label={t('chat.restoreHere')} onClick={() => toast('Restore point selected')} className="hover:text-[var(--text)]">
+          <button type="button" aria-label={t('chat.restoreHere')} onClick={() => {
+            truncate(msg.id);
+            toast(t('chat.truncated'));
+          }} className="hover:text-[var(--text)]">
             <Undo2 size={16} />
           </button>
         </Tip>
@@ -661,7 +637,7 @@ function UserMessage({ msg }: { msg: Message & { kind: 'user' } }) {
           <button
             type="button"
             aria-label={t('chat.copy')}
-            onClick={() => { void navigator.clipboard?.writeText(msg.text); setCopied(true); setTimeout(() => setCopied(false), 1200); setDraft(''); }}
+            onClick={() => { void navigator.clipboard?.writeText(msg.text); setCopied(true); setTimeout(() => setCopied(false), 1200); }}
             className="hover:text-[var(--text)]"
           >
             {copied ? <CheckCheck size={16} /> : <Copy size={16} />}
@@ -700,23 +676,6 @@ export function ChatEmpty() {
   );
 }
 
-export function MissionBanner() {
-  const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId));
-  const stop = useStore((s) => s.stop);
-  if (!session || session.mode !== 'mission' || session.status !== 'running') return null;
-  return (
-    <div className="mx-3 mb-1 flex items-center gap-3 px-3 py-2 rounded-xl" style={{ background: 'var(--elevated)', border: '1px solid var(--line-strong)' }}>
-      <Sparkles size={16} style={{ color: 'var(--accent)' }} />
-      <div className="flex-1 min-w-0">
-        <div className="text-[13.5px] truncate">Mission: ship the multi-page build</div>
-        <div className="mt-1"><Progress value={34} /></div>
-      </div>
-      <span className="text-[12.5px] text-[var(--muted)] whitespace-nowrap">step 3/9 · 4m</span>
-      <Btn size="sm" variant="outline" onClick={stop}>Pause</Btn>
-    </div>
-  );
-}
-
 export function MessageList() {
   const { t } = useI18n();
   const messages = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId)?.messages ?? []);
@@ -724,8 +683,7 @@ export function MessageList() {
   const ref = useRef<HTMLDivElement>(null);
   const [showScroll, setShowScroll] = useState(false);
   const near = useRef(true);
-  const toast = useStore((s) => s.toast);
-
+  
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -760,7 +718,7 @@ export function MessageList() {
               m.kind === 'user' ? (
                 <UserMessage key={m.id} msg={m} />
               ) : (
-                <AssistantMessage key={m.id} turn={m.turn} onComment={() => toast('Comment added to this answer')} />
+                <AssistantMessage key={m.id} turn={m.turn} />
               ),
             )}
             {running ? (
@@ -796,6 +754,7 @@ export function MessageList() {
 }
 
 export function PermissionToastWatcher() {
+  const { t } = useI18n();
   const sessions = useStore((s) => s.sessions);
   const active = useStore((s) => s.activeSessionId);
   const toast = useStore((s) => s.toast);
@@ -808,7 +767,7 @@ export function PermissionToastWatcher() {
         const id = last.turn.permission.id;
         if (!seen.current.has(id)) {
           seen.current.add(id);
-          toast('Permission needed in another session');
+          toast(t('chat.permissionOther'));
         }
       }
     });

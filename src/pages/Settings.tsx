@@ -200,8 +200,8 @@ function GeneralTab() {
       <div className="mb-4">
         <SectionTitle icon={<Sparkles size={18} />} title={t('settings.feedback')} />
         <div className="card p-3 flex items-center gap-2">
-          <Btn variant="inverse" className="flex-1" onClick={() => toast('Thanks — feedback opened')}>{t('settings.reportIssue')}</Btn>
-          <Btn variant="inverse" className="w-9 px-0" aria-label="Discord" onClick={() => toast('Opening Discord')}>
+          <Btn variant="inverse" className="flex-1" disabled title={t('settings.feedbackUnavailable')}>{t('settings.reportIssue')}</Btn>
+          <Btn variant="inverse" className="w-9 px-0" aria-label="Discord" disabled title={t('settings.discordUnavailable')}>
             <ExternalLink size={17} />
           </Btn>
         </div>
@@ -269,7 +269,7 @@ function GeneralTab() {
             <Btn size="sm" variant="outline" onClick={() => fileRef.current?.click()}>{t('settings.import')}</Btn>
           </Row>
           <Row label={t('settings.resetDemo')} hint={t('settings.resetHint')}>
-            <Btn size="sm" variant="outline" onClick={() => { useStore.getState().resetSettings(); toast('Demo data reset'); }}>Reset</Btn>
+            <Btn size="sm" variant="outline" onClick={() => { useStore.getState().resetSettings(); toast(t('settings.resetDone')); }}>Reset</Btn>
           </Row>
           <Row label={t('settings.deleteChats')}>
             <Btn size="sm" variant="danger" onClick={() => setDeleteOpen(true)}>{t('common.delete')}</Btn>
@@ -284,7 +284,7 @@ function GeneralTab() {
         footer={
           <>
             <Btn variant="ghost" onClick={() => setDeleteOpen(false)}>{t('common.cancel')}</Btn>
-            <Btn variant="danger" disabled={confirm !== 'DELETE'} onClick={() => { setDeleteOpen(false); setConfirm(''); toast('All chats deleted'); }}>
+            <Btn variant="danger" disabled={confirm !== 'DELETE'} onClick={() => { useStore.getState().deleteAllChats(); setDeleteOpen(false); setConfirm(''); toast(t('settings.deleteChatsDone')); }}>
               {t('common.delete')}
             </Btn>
           </>
@@ -374,7 +374,7 @@ function AppearanceTab() {
       <div className="grid grid-cols-2 gap-4 mt-4">
         <button
           type="button"
-          onClick={() => { setTheme('auto'); toast('Theme: Auto'); }}
+          onClick={() => { setTheme('auto'); toast(t('settings.themeSet', { name: 'Auto' })); }}
           className="text-start relative rounded-[14px] p-1.5 transition-transform hover:-translate-y-0.5"
           style={{
             border: themeId === 'auto' ? '2px solid var(--accent)' : '2px solid transparent',
@@ -395,7 +395,7 @@ function AppearanceTab() {
             <button
               key={theme.id}
               type="button"
-              onClick={() => { setTheme(theme.id); toast(`Theme: ${theme.label}`); }}
+              onClick={() => { setTheme(theme.id); toast(t('settings.themeSet', { name: theme.label })); }}
               className="text-start relative rounded-[14px] p-1.5 transition-transform hover:-translate-y-0.5 active:scale-[.98]"
               style={{
                 border: selected ? '2px solid var(--accent)' : '2px solid transparent',
@@ -566,13 +566,6 @@ function UsageTab() {
 }
 
 /* ------------------------------- skills ------------------------------- */
-const GALLERY = [
-  { name: 'web-design-guidelines', desc: 'Review UI code against interface guidelines.', author: 'freecode', installs: '12.4k' },
-  { name: 'frontend-design', desc: 'Distinctive visual design for new UI.', author: 'freecode', installs: '8.1k' },
-  { name: 'canvas-design', desc: 'Posters and PDFs with real design philosophy.', author: 'freecode', installs: '5.6k' },
-  { name: 'ai-video-generation', desc: 'Veo, Seedance and 40+ video models.', author: 'community', installs: '3.2k' },
-];
-
 function SkillsTab() {
   const { t } = useI18n();
   const skills = useStore((s) => s.skills);
@@ -580,7 +573,6 @@ function SkillsTab() {
   const add = useStore((s) => s.addSkill);
   const toast = useStore((s) => s.toast);
   const [query, setQuery] = useState('');
-  const [discover, setDiscover] = useState(false);
   const [create, setCreate] = useState(false);
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
@@ -597,9 +589,9 @@ function SkillsTab() {
       <div className="card p-4">
         <SearchInput value={query} onValueChange={setQuery} placeholder={t('settings.searchSkills')} />
         <div className="flex gap-2 mt-3">
-          <Btn variant="inverse" onClick={() => setDiscover(true)}>{t('settings.discover')}</Btn>
+          <Btn variant="inverse" disabled title={t('settings.discoverUnavailable')}>{t('settings.discover')}</Btn>
           <Btn variant="inverse" onClick={() => setCreate(true)}>{t('settings.create')}</Btn>
-          <Btn variant="inverse" onClick={() => toast('Drop a folder containing SKILL.md')}>{t('settings.upload')}</Btn>
+          <Btn variant="inverse" disabled title={t('settings.skillsUploadUnavailable')}>{t('settings.upload')}</Btn>
         </div>
         <div className="mt-3 divide-y divide-[var(--line)]">
           {shown.map((s) => (
@@ -618,36 +610,13 @@ function SkillsTab() {
                 <div className="text-[12px] text-[var(--faint)] mt-1">Used {s.used} times</div>
               </div>
               <div className="flex items-center gap-2 flex-none">
-                <Btn size="sm" variant="outline" onClick={() => toast(`Editing ${s.name}`)}>{t('common.edit')}</Btn>
+                <Btn size="sm" variant="outline" disabled title={t('settings.skillEditUnavailable')}>{t('common.edit')}</Btn>
                 <Switch checked={s.enabled} onChange={() => toggle(s.id)} label={s.name} />
               </div>
             </div>
           ))}
         </div>
       </div>
-
-      <Dialog open={discover} onClose={() => setDiscover(false)} title={t('settings.discover')} width={540} sheet>
-        <div className="grid gap-2">
-          {GALLERY.map((g) => (
-            <div key={g.name} className="card p-3 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-[10px] grid place-items-center" style={{ background: 'var(--elevated)' }}>
-                <Sparkles size={18} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[15px] font-semibold font-mono truncate" dir="ltr">{g.name}</div>
-                <div className="text-[13px] text-[var(--muted)]">{g.desc} · {g.installs} installs</div>
-              </div>
-              <Btn
-                size="sm"
-                variant="inverse"
-                onClick={() => { add(g.name, g.desc); toast(`Installed ${g.name}`); }}
-              >
-                Install
-              </Btn>
-            </div>
-          ))}
-        </div>
-      </Dialog>
 
       <Dialog
         open={create}
@@ -657,7 +626,7 @@ function SkillsTab() {
         footer={
           <>
             <Btn variant="ghost" onClick={() => setCreate(false)}>{t('common.cancel')}</Btn>
-            <Btn variant="primary" disabled={!name.includes('-')} onClick={() => { add(name, desc || 'Project skill'); setCreate(false); setName(''); setDesc(''); toast('Skill created'); }}>
+            <Btn variant="primary" disabled={!name.includes('-')} onClick={() => { add(name, desc || 'Project skill'); setCreate(false); setName(''); setDesc(''); toast(t('settings.skillCreated')); }}>
               {t('common.save')}
             </Btn>
           </>
@@ -676,10 +645,6 @@ function SkillsTab() {
           <div>
             <label className="text-[13.5px] text-[var(--muted)]">Instructions</label>
             <textarea className="area mt-1" rows={5} defaultValue={'# My skill\n\n1. Read the changed files.\n2. Check against the guidelines.'} />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[13.5px] text-[var(--muted)]">Scope</span>
-            <Segmented value={'project'} onChange={() => {}} options={[{ value: 'project', label: 'Project' }, { value: 'global', label: 'Global' }]} />
           </div>
         </div>
       </Dialog>
@@ -718,7 +683,7 @@ function ProjectTab() {
         ) : (
           <MenuItem>{t('drawer.noProjects')}</MenuItem>
         )}
-        <MenuItem icon={<Plus size={14} />}>{t('drawer.newProject')}</MenuItem>
+        <MenuItem icon={<Plus size={14} />} disabled reason={t('drawer.newProjectUnavailable')}>{t('drawer.newProject')}</MenuItem>
       </Menu>
 
       <SectionTitle icon={<TerminalSquare size={18} />} title={t('settings.startupScript')} help={t('settings.startupHint')} />
@@ -732,13 +697,13 @@ function ProjectTab() {
           aria-label={t('settings.startupScript')}
         />
         <p className="text-[13px] text-[var(--muted)] mt-2">{t('settings.startupHint')}</p>
-        <button type="button" className="text-[13.5px] text-[var(--muted)] hover:text-[var(--text)] mt-1" onClick={() => toast('Startup script ran')}>
+        <button type="button" disabled title={t('settings.startupUnavailable')} className="text-[13.5px] text-[var(--faint)] mt-1 disabled:opacity-50 disabled:cursor-not-allowed">
           {t('settings.runNow')}
         </button>
       </div>
 
       <div className="mt-6">
-        <SectionTitle icon={<KeyRound size={18} />} title={t('settings.secrets')} help="Values are stored encrypted and only shown masked." />
+        <SectionTitle icon={<KeyRound size={18} />} title={t('settings.secrets')} help={t('settings.secretsHint')} />
         <div className="card p-4 mt-2">
           <div className="flex flex-col gap-2">
             {secrets.map((s) => (
@@ -776,7 +741,7 @@ function ProjectTab() {
                     if (!name || !value) return;
                     if (secrets.some((s) => s.name === name)) { setError('Name already exists.'); return; }
                     setSecrets([...secrets, { name, value, shown: false }]);
-                    setName(''); setValue(''); toast('Secret added');
+                    setName(''); setValue(''); toast(t('settings.secretAdded'));
                   }}
                 >
                   {t('common.add')}
@@ -810,7 +775,7 @@ function ProjectTab() {
         <SectionTitle icon={<Trash2 size={18} />} title={t('settings.dangerZone')} />
         <div className="card p-4 mt-2 flex items-center justify-between gap-3" style={{ borderColor: 'color-mix(in srgb, var(--danger) 30%, var(--line))' }}>
           <p className="text-[13.5px] text-[var(--muted)]">Deleting a project removes its files, secrets and sessions.</p>
-          <Btn variant="danger" onClick={() => toast('Project deletion needs confirmation')}>{t('settings.deleteProject')}</Btn>
+          <Btn variant="danger" disabled title={t('settings.projectDeleteUnavailable')}>{t('settings.deleteProject')}</Btn>
         </div>
       </div>
     </div>
@@ -822,13 +787,11 @@ const SHORTCUTS = [
   ['General', [['Command palette', '⌘ K'], ['New chat', '⌘ ⇧ O'], ['Toggle drawer', '⌘ B'], ['Open settings', '⌘ ,']]],
   ['Chat', [['Focus composer', '⌘ L'], ['Send', 'Enter'], ['Stop agent', 'Esc'], ['Switch mode', 'Alt 1–4']]],
   ['Panels', [['Toggle terminal', '⌃ `'], ['Toggle files', '⌘ ⇧ E'], ['Close tab', '⌘ W']]],
-  ['Changes', [['Accept hunk', 'Y'], ['Reject hunk', 'N'], ['Next change', 'J'], ['Commit', '⌘ Enter']]],
 ];
 
 function KeyboardTab() {
   const { t } = useI18n();
   const [query, setQuery] = useState('');
-  const [capture, setCapture] = useState<string | null>(null);
   return (
     <div className="max-w-[720px]">
       <PageTitle>{t('settings.keyboard')}</PageTitle>
@@ -844,14 +807,7 @@ function KeyboardTab() {
                 {list.map(([label, keys]) => (
                   <div key={label} className="flex items-center gap-2 py-2.5">
                     <span className="text-[15px] flex-1">{label}</span>
-                    {capture === label ? (
-                      <span className="text-[12.5px] px-2 py-1 rounded-md" style={{ border: '1px solid var(--warning)', color: 'var(--warning)' }}>Press new keys…</span>
-                    ) : (
-                      <button type="button" onClick={() => setCapture(label)} aria-label={`Change ${label}`}>
-                        <Kbd>{keys}</Kbd>
-                      </button>
-                    )}
-                    <button type="button" className="text-[12px] text-[var(--faint)] hover:text-[var(--text)]" onClick={() => setCapture(null)}>Reset</button>
+                    <Kbd>{keys}</Kbd>
                   </div>
                 ))}
               </SettingCard>
@@ -859,7 +815,7 @@ function KeyboardTab() {
           );
         })}
       </div>
-      <Btn variant="ghost" className="mt-4" onClick={() => useStore.getState().toast('Shortcuts reset')}>{t('settings.resetAll')}</Btn>
+      <p className="text-[13px] text-[var(--muted)] mt-4">{t('settings.shortcutsReadOnly')}</p>
     </div>
   );
 }
@@ -868,7 +824,7 @@ function KeyboardTab() {
 function AccountTab() {
   const { t } = useI18n();
   const toast = useStore((s) => s.toast);
-  const [name, setName] = useState('');
+  const [name, setName] = useState(() => localStorage.getItem('fc.name') ?? '');
   return (
     <div className="max-w-[720px]">
       <PageTitle>{t('settings.account')}</PageTitle>
@@ -883,7 +839,16 @@ function AccountTab() {
           </div>
           <div className="text-[13.5px] text-[var(--muted)]">{t('account.guestHint')}</div>
         </div>
-        <Btn variant="outline" size="sm" onClick={() => toast(t('account.savedLocally'))}>{t('common.save')}</Btn>
+        <Btn
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            localStorage.setItem('fc.name', name.trim());
+            toast(t('account.savedLocally'));
+          }}
+        >
+          {t('common.save')}
+        </Btn>
       </div>
 
       <div className="mt-5">
@@ -892,38 +857,28 @@ function AccountTab() {
           <Row label={t('settings.displayName')}>
             <Input value={name} onValueChange={setName} className="w-52" />
           </Row>
-          <Row label={t('settings.email')}>
-            <span className="text-[14px] text-[var(--muted)]">mohammed@example.com</span>
+          <Row label="GitHub" hint={t('settings.githubUnavailable')}>
+            <Btn size="sm" variant="outline" disabled>{t('common.connect')}</Btn>
           </Row>
-          <Row label="GitHub" hint="Connected as @mhamad-code">
-            <Btn size="sm" variant="outline" onClick={() => toast('GitHub disconnected')}>{t('common.disconnect')}</Btn>
+          <Row label="Google" hint={t('settings.googleUnavailable')}>
+            <Btn size="sm" variant="outline" disabled>{t('common.connect')}</Btn>
           </Row>
-          <Row label="Google">
-            <Btn size="sm" variant="inverse" onClick={() => toast('Google connected')}>{t('common.connect')}</Btn>
-          </Row>
-          <Row label={t('settings.twoFactor')}>
-            <Switch checked={false} onChange={() => toast('Two-factor setup')} label={t('settings.twoFactor')} />
+          <Row label={t('settings.twoFactor')} hint={t('settings.twoFactorUnavailable')}>
+            <Btn size="sm" variant="outline" disabled>{t('common.add')}</Btn>
           </Row>
         </SettingCard>
       </div>
 
       <div className="mt-5">
         <SectionTitle icon={<Shield size={18} />} title={t('settings.activeDevices')} />
-        <SettingCard>
-          <Row label="MacBook Pro · Chrome" hint="Berlin · current session">
-            <Badge tone="accent">Current</Badge>
-          </Row>
-          <Row label="iPhone 15 · Safari" hint="Berlin · 2 hours ago">
-            <Btn size="sm" variant="ghost" onClick={() => toast('Device signed out')}>Sign out</Btn>
-          </Row>
-        </SettingCard>
+        <div className="card mt-2 p-4 text-[13.5px] text-[var(--muted)]">{t('settings.devicesUnavailable')}</div>
       </div>
 
       <div className="mt-5 mb-8">
         <SectionTitle icon={<Trash2 size={18} />} title={t('settings.dangerZone')} />
         <div className="card p-4 mt-2 flex items-center justify-between">
-          <p className="text-[13.5px] text-[var(--muted)]">{t('settings.deleteAccount')}</p>
-          <Btn variant="danger" size="sm" onClick={() => toast('Type your email to confirm')}>{t('settings.deleteAccount')}</Btn>
+          <p className="text-[13.5px] text-[var(--muted)]">{t('settings.deleteAccountUnavailable')}</p>
+          <Btn variant="danger" size="sm" disabled>{t('settings.deleteAccount')}</Btn>
         </div>
       </div>
     </div>
@@ -936,7 +891,6 @@ function McpTab() {
   const servers = useStore((s) => s.mcp);
   const toggle = useStore((s) => s.toggleMcp);
   const toggleTool = useStore((s) => s.toggleMcpTool);
-  const toast = useStore((s) => s.toast);
   const [open, setOpen] = useState<string | null>('fs');
 
   return (
@@ -944,8 +898,8 @@ function McpTab() {
       <div className="flex items-center justify-between gap-2">
         <PageTitle>MCP servers</PageTitle>
         <div className="flex gap-2 mb-4">
-          <Btn variant="inverse" size="sm" onClick={() => toast('Add server')}>{t('common.add')}</Btn>
-          <Btn variant="outline" size="sm" onClick={() => toast('Import JSON')}>Import JSON</Btn>
+          <Btn variant="inverse" size="sm" disabled title={t('settings.mcpUnavailable')}>{t('common.add')}</Btn>
+          <Btn variant="outline" size="sm" disabled title={t('settings.mcpUnavailable')}>Import JSON</Btn>
         </div>
       </div>
       <div className="flex flex-col gap-3">
@@ -972,7 +926,7 @@ function McpTab() {
                 <div className="mt-3 pt-3 border-t border-[var(--line)]">
                   <div className="flex items-center gap-2">
                     <code className="code-chip truncate flex-1" dir="ltr">{s.command}</code>
-                    <Btn size="sm" variant="outline" onClick={() => toast('Connection ok · 42ms')}>Test connection</Btn>
+                    <Btn size="sm" variant="outline" disabled title={t('settings.mcpUnavailable')}>Test connection</Btn>
                   </div>
                   <div className="mt-3 flex flex-col gap-1.5">
                     {s.tools.map((tool) => (
@@ -983,9 +937,8 @@ function McpTab() {
                     ))}
                   </div>
                   <div className="flex items-center gap-2 mt-3">
-                    <span className="text-[12.5px] text-[var(--muted)]">Permission policy</span>
-                    <Select value={s.policy === 'ask' ? 'Ask' : s.policy === 'auto' ? 'Auto-allow' : 'Block'} options={['Ask', 'Auto-allow', 'Block']} onChange={() => {}} />
-                    <Btn size="sm" variant="ghost" className="ms-auto" style={{ color: 'var(--danger)' }} onClick={() => toast('Server removed')}>{t('common.remove')}</Btn>
+                    <span className="text-[12.5px] text-[var(--muted)]">{t('settings.mcpUnavailable')}</span>
+                    <Btn size="sm" variant="ghost" className="ms-auto" disabled style={{ color: 'var(--danger)' }}>{t('common.remove')}</Btn>
                   </div>
                 </div>
               ) : null}

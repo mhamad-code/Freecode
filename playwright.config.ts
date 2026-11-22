@@ -9,7 +9,7 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:3100',
     trace: 'off',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], channel: 'chromium' } }],
   webServer: {
     command: 'node scripts/serve-dist.mjs 3100',
     url: 'http://127.0.0.1:3100',

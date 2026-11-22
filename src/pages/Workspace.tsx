@@ -1,6 +1,6 @@
 import { useStore } from '../store';
 import { useMedia } from '../components/ui';
-import { ChatEmpty, MessageList, MissionBanner } from '../components/Chat';
+import { ChatEmpty, MessageList } from '../components/Chat';
 import { Composer } from '../components/Composer';
 import { PanelToolbar } from '../components/Shell';
 import { TerminalDock, ToolPane } from '../components/ToolPane';
@@ -17,13 +17,11 @@ export default function Workspace() {
     <div className="h-full flex flex-col min-h-0">
       <PanelToolbar />
       <RuntimeBanner />
-      <MissionBanner />
       <div className="flex-1 min-h-0 flex">
         {showChat ? (
           <div className="flex-1 min-w-0 flex flex-col min-h-0">
             <MessageList />
             <Composer />
-            <TerminalDock />
           </div>
         ) : null}
         {showTools ? (
@@ -36,6 +34,7 @@ export default function Workspace() {
         ) : null}
         {!showChat && !showTools ? <ChatEmpty /> : null}
       </div>
+      <TerminalDock />
     </div>
   );
 }

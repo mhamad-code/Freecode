@@ -39,6 +39,19 @@ import {
   getCheckpoint,
   treeFromContents,
 } from './lib/checkpoints';
+import { findNode, insertDir, insertFile, removeAt, renameAt, subtreePaths } from './lib/fileTree';
+import { uniquePath } from './lib/pathValidation';
+
+export type UploadEntry =
+  | { path: string; text: string; size: number }
+  | { path: string; binary: { size: number; type: string; data: string } };
+
+export interface FsLogEntry {
+  id: string;
+  op: string;
+  path: string;
+  at: number;
+}
 
 export interface Settings {
   advancedMode: boolean;
@@ -64,6 +77,9 @@ const liveControllers = new Map<string, AbortController>();
 const permissionWaiters = new Map<string, (d: 'allow-once' | 'allow-always' | 'deny') => void>();
 
 const touch = (s: Session): Session => ({ ...s, updatedAt: Date.now() });
+
+const pushLog = (list: FsLogEntry[], op: string, path: string): FsLogEntry[] =>
+  [{ id: uid(), op, path, at: Date.now() }, ...list].slice(0, 100);
 
 /** Adds a file (and its folders) to the tree without opening it. */
 const insertPath = (nodes: FileNode[], path: string, status: 'A' | 'M'): FileNode[] => {
@@ -139,6 +155,7 @@ interface AppStore {
     activeSessionId?: string;
     files?: FileNode[];
     fileContents?: Record<string, string>;
+    binaryFiles?: Record<string, { size: number; type: string; data: string }>;
     settings?: Partial<Settings>;
   }) => void;
 
@@ -156,7 +173,13 @@ interface AppStore {
   setActiveSession: (id: string) => void;
   newSession: () => string;
   closeSession: (id: string) => void;
+  deleteAllChats: () => void;
   renameSession: (id: string, title: string) => void;
+  moveSession: (id: string, delta: number) => void;
+  /** Drops every message after this one, keeping the conversation readable. */
+  truncateFromMessage: (id: string) => void;
+  /** Replaces this message and sends the new text, dropping what followed. */
+  resendFromMessage: (id: string, text: string) => void;
   setDraft: (text: string) => void;
   setSessionMode: (m: Mode) => void;
   setModel: (m: string) => void;
@@ -190,8 +213,20 @@ interface AppStore {
   openFile: (path: string) => void;
   /** Creates an empty file (and its folders) in the in-memory project. */
   createFile: (path: string) => void;
+  /** Creates an empty folder, which is kept even without files. */
+  createFolder: (path: string) => void;
+  /** Adds uploaded files (text or binary) in one commit. */
+  addFiles: (entries: UploadEntry[]) => void;
+  renamePath: (from: string, to: string) => void;
+  duplicatePath: (path: string) => string | undefined;
+  deletePath: (path: string, opts?: { confirm?: boolean }) => void;
   saveFile: (path: string, content: string) => void;
   fileContents: Record<string, string>;
+  /** Files that are not UTF-8 text; stored as base64 for download. */
+  binaryFiles: Record<string, { size: number; type: string; data: string }>;
+  /** Mutations made from the workspace panels, newest first. */
+  fsLog: FsLogEntry[];
+  logFs: (op: string, path: string) => void;
 
   git: GitState;
   toggleStage: (path: string) => void;
@@ -284,6 +319,7 @@ export const useStore = create<AppStore>((set, get) => ({
         sessions: payload.sessions,
         activeSessionId: active,
         settings: payload.settings ? { ...s.settings, ...payload.settings } : s.settings,
+        binaryFiles: payload.binaryFiles ?? s.binaryFiles,
         ...(payload.fileContents
           ? {
               fileContents: payload.fileContents,
@@ -303,6 +339,8 @@ export const useStore = create<AppStore>((set, get) => ({
       activeSessionId: fresh.id,
       files: [],
       fileContents: {},
+      binaryFiles: {},
+      fsLog: [],
       openFilePath: null,
       git: EMPTY_GIT,
       integrations: INTEGRATION_CATALOG,
@@ -342,8 +380,34 @@ export const useStore = create<AppStore>((set, get) => ({
         activeSessionId: st.activeSessionId === id ? sessions[sessions.length - 1].id : st.activeSessionId,
       };
     }),
+  deleteAllChats: () => {
+    const fresh = newChatSession();
+    set({ sessions: [fresh], activeSessionId: fresh.id });
+  },
   renameSession: (id, title) =>
     set((st) => ({ sessions: st.sessions.map((s) => (s.id === id ? { ...s, title: title || 'Untitled' } : s)) })),
+  moveSession: (id, delta) =>
+    set((st) => {
+      const index = st.sessions.findIndex((s) => s.id === id);
+      const target = index + delta;
+      if (index < 0 || target < 0 || target >= st.sessions.length) return {};
+      const sessions = [...st.sessions];
+      const [moved] = sessions.splice(index, 1);
+      sessions.splice(target, 0, moved);
+      return { sessions };
+    }),
+  truncateFromMessage: (id) =>
+    set((st) => ({
+      sessions: st.sessions.map((s) => {
+        if (s.id !== st.activeSessionId) return s;
+        const index = s.messages.findIndex((m) => m.id === id);
+        return index < 0 ? s : touch({ ...s, messages: s.messages.slice(0, index + 1) });
+      }),
+    })),
+  resendFromMessage: (id, text) => {
+    get().truncateFromMessage(id);
+    get().send(text);
+  },
   setDraft: (draft) =>
     set((st) => ({
       sessions: st.sessions.map((s) => (s.id === st.activeSessionId ? { ...s, draft } : s)),
@@ -516,7 +580,7 @@ export const useStore = create<AppStore>((set, get) => ({
     const titles: Record<ToolTabKind, string> = {
       launcher: 'New tab',
       files: 'Files',
-      browser: 'Cloud browser',
+      browser: 'Browser',
       terminal: 'Terminal',
       overview: 'Overview',
       changes: 'Changes',
@@ -546,34 +610,147 @@ export const useStore = create<AppStore>((set, get) => ({
 
   files: [],
   fileContents: {},
+  binaryFiles: {},
+  fsLog: [],
+  logFs: (op, path) => set((s) => ({ fsLog: pushLog(s.fsLog, op, path) })),
   openFilePath: null,
   openFile: (path) => {
     set({ openFilePath: path });
     get().openTool('editor', path);
   },
-  createFile: (path) =>
+  createFile: (path) => {
+    if (findNode(get().files, path)) return;
+    const contents = get().fileContents[path] ?? '';
+    void syncFile(path, contents);
+    set((s) => ({
+      files: insertFile(s.files, path, 'A'),
+      fileContents: { ...s.fileContents, [path]: contents },
+      openFilePath: path,
+      fsLog: pushLog(s.fsLog, 'create', path),
+    }));
+  },
+  createFolder: (path) => {
+    if (findNode(get().files, path)) return;
+    set((s) => ({
+      files: insertDir(s.files, path),
+      fsLog: pushLog(s.fsLog, 'mkdir', path),
+    }));
+  },
+  addFiles: (entries) => {
+    if (!entries.length) return;
     set((s) => {
-      if (s.files.some((n) => n.path === path)) return {};
-      const parts = path.split('/').filter(Boolean);
-      const insert = (nodes: FileNode[], depth: number): FileNode[] => {
-        const name = parts[depth];
-        const full = parts.slice(0, depth + 1).join('/');
-        if (depth === parts.length - 1) {
-          return [...nodes, { name, path: full, type: 'file', status: 'A' }];
+      let tree = s.files;
+      const contents = { ...s.fileContents };
+      const binary = { ...s.binaryFiles };
+      let log = s.fsLog;
+      for (const entry of entries) {
+        if ('text' in entry) {
+          contents[entry.path] = entry.text;
+          delete binary[entry.path];
+          tree = insertFile(tree, entry.path, s.fileContents[entry.path] === undefined ? 'A' : 'M');
+        } else {
+          binary[entry.path] = entry.binary;
+          tree = insertFile(tree, entry.path, 'A');
         }
-        const dir = nodes.find((n) => n.type === 'dir' && n.path === full);
-        if (dir) {
-          return nodes.map((n) => (n === dir ? { ...n, children: insert(n.children ?? [], depth + 1) } : n));
-        }
-        return [...nodes, { name, path: full, type: 'dir', children: insert([], depth + 1) }];
-      };
-      void syncFile(path, s.fileContents[path] ?? '');
-      return {
-        files: insert(s.files, 0),
-        fileContents: { ...s.fileContents, [path]: s.fileContents[path] ?? '' },
-        openFilePath: path,
-      };
-    }),
+        log = pushLog(log, 'upload', entry.path);
+        if ('text' in entry) void syncFile(entry.path, entry.text);
+      }
+      return { files: tree, fileContents: contents, binaryFiles: binary, fsLog: log };
+    });
+  },
+  renamePath: (from, to) => {
+    const state = get();
+    const node = findNode(state.files, from);
+    if (!node || findNode(state.files, to)) return;
+    const contents: Record<string, string> = {};
+    for (const [path, text] of Object.entries(state.fileContents)) {
+      if (path === from || path.startsWith(`${from}/`)) {
+        contents[`${to}${path.slice(from.length)}`] = text;
+      } else {
+        contents[path] = text;
+      }
+    }
+    const binary: Record<string, { size: number; type: string; data: string }> = {};
+    for (const [path, blob] of Object.entries(state.binaryFiles)) {
+      if (path === from || path.startsWith(`${from}/`)) {
+        binary[`${to}${path.slice(from.length)}`] = blob;
+      } else {
+        binary[path] = blob;
+      }
+    }
+    const moved = subtreePaths(state.files, from);
+    const oldPaths = [...moved.files, from];
+    void removeProjectFiles(state.activeSessionId, oldPaths);
+    for (const path of moved.files) {
+      const next = `${to}${path.slice(from.length)}`;
+      void removeFile(path);
+      void syncFile(next, contents[next] ?? '');
+    }
+    set((s) => ({
+      files: renameAt(s.files, from, to),
+      fileContents: contents,
+      binaryFiles: binary,
+      openFilePath: s.openFilePath === from || s.openFilePath?.startsWith(`${from}/`)
+        ? `${to}${s.openFilePath.slice(from.length)}`
+        : s.openFilePath,
+      toolTabs: s.toolTabs.map((tab) =>
+        tab.kind === 'editor' && tab.path && (tab.path === from || tab.path.startsWith(`${from}/`))
+          ? { ...tab, path: `${to}${tab.path.slice(from.length)}`, title: `${to}`.split('/').pop() ?? tab.title }
+          : tab,
+      ),
+      fsLog: pushLog(s.fsLog, 'rename', `${from} → ${to}`),
+    }));
+  },
+  duplicatePath: (path) => {
+    const state = get();
+    const node = findNode(state.files, path);
+    if (!node) return undefined;
+    const taken = new Set(Object.keys(state.fileContents));
+    for (const key of Object.keys(state.binaryFiles)) taken.add(key);
+    const target = uniquePath(path, taken);
+    const entries: UploadEntry[] = [];
+    const files = subtreePaths(state.files, path).files;
+    if (node.type === 'file') files.push(path);
+    for (const file of files) {
+      const next = `${target}${file.slice(path.length)}`;
+      const text = state.fileContents[file];
+      if (text !== undefined) entries.push({ path: next, text, size: text.length });
+      const blob = state.binaryFiles[file];
+      if (blob) entries.push({ path: next, binary: blob });
+    }
+    if (node.type === 'dir' && !entries.length) get().createFolder(target);
+    get().addFiles(entries);
+    get().logFs('duplicate', `${path} → ${target}`);
+    return target;
+  },
+  deletePath: (path) => {
+    const state = get();
+    const node = findNode(state.files, path);
+    if (!node) return;
+    const scope = subtreePaths(state.files, path);
+    const files = node.type === 'file' ? [path, ...scope.files] : scope.files;
+    const prefix = `${path}/`;
+    const contents = { ...state.fileContents };
+    const binary = { ...state.binaryFiles };
+    for (const key of Object.keys(contents)) {
+      if (key === path || key.startsWith(prefix)) delete contents[key];
+    }
+    for (const key of Object.keys(binary)) {
+      if (key === path || key.startsWith(prefix)) delete binary[key];
+    }
+    void removeProjectFiles(state.activeSessionId, files);
+    for (const file of files) void removeFile(file);
+    set((s) => ({
+      files: removeAt(s.files, path),
+      fileContents: contents,
+      binaryFiles: binary,
+      openFilePath: s.openFilePath === path || s.openFilePath?.startsWith(prefix) ? null : s.openFilePath,
+      toolTabs: s.toolTabs.filter(
+        (tab) => !(tab.kind === 'editor' && tab.path && (tab.path === path || tab.path.startsWith(prefix))),
+      ),
+      fsLog: pushLog(s.fsLog, 'delete', path),
+    }));
+  },
   saveFile: (path, content) =>
     set((s) => {
       const walk = (nodes: FileNode[]): FileNode[] =>
@@ -585,7 +762,11 @@ export const useStore = create<AppStore>((set, get) => ({
               : n,
         );
       void syncFile(path, content);
-      return { fileContents: { ...s.fileContents, [path]: content }, files: walk(s.files) };
+      return {
+        fileContents: { ...s.fileContents, [path]: content },
+        files: walk(s.files),
+        fsLog: pushLog(s.fsLog, 'save', path),
+      };
     }),
 
   enqueue: (text) => {

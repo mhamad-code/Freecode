@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import {
   ArrowLeft,
@@ -39,15 +39,19 @@ import type { ChangedFile, FileNode, ToolTab } from '../lib/types';
 import {
   Badge,
   Btn,
-  Chip,
+  Dialog,
   IBtn,
   Input,
   Menu,
   MenuItem,
+  Progress,
   SearchInput,
   SectionTitle,
   Segmented,
 } from './ui';
+import { checkPath, childPath, PATH_ISSUE_KEY, uniquePath } from '../lib/pathValidation';
+import { findNode } from '../lib/fileTree';
+import type { UploadEntry } from '../store';
 
 /* ================================ shell ================================ */
 
@@ -195,23 +199,64 @@ function Launcher() {
 }
 
 /* ================================ files ================================ */
+const MAX_UPLOAD_FILE = 512 * 1024;
+const MAX_UPLOAD_TOTAL = 4 * 1024 * 1024;
+
+const formatBytes = (bytes: number) =>
+  bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : bytes >= 1024
+      ? `${Math.round(bytes / 1024)} kB`
+      : `${bytes} B`;
+
+const listTreePaths = (nodes: FileNode[]): { files: string[]; dirs: string[] } => {
+  const files: string[] = [];
+  const dirs: string[] = [];
+  const walk = (list: FileNode[]) => {
+    for (const node of list) {
+      if (node.type === 'dir') {
+        dirs.push(node.path);
+        walk(node.children ?? []);
+      } else {
+        files.push(node.path);
+      }
+    }
+  };
+  walk(nodes);
+  return { files, dirs };
+};
+
+const toBase64 = (bytes: Uint8Array): string => {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+};
+
+type UploadDraft = UploadEntry & { size: number };
+
 function FilesPanel() {
   const { t } = useI18n();
   const files = useStore((s) => s.files);
   const openFile = useStore((s) => s.openFile);
   const [query, setQuery] = useState('');
-
-  /** One honest empty file, so the editor has something to open. */
-  const newFile = () => {
-    const contents = useStore.getState().fileContents;
-    let i = 1;
-    let path = 'notes.md';
-    while (contents[path] !== undefined) path = `notes-${++i}.md`;
-    useStore.getState().createFile(path);
-    openFile(path);
-  };
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ src: true, 'src/routes': true });
   const [selected, setSelected] = useState<string | null>(null);
+  const [creating, setCreating] = useState<{ type: 'file' | 'dir'; parent: string } | null>(null);
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [menu, setMenu] = useState<{ x: number; y: number; node: FileNode } | null>(null);
+  const [deleting, setDeleting] = useState<FileNode | null>(null);
+  const [upload, setUpload] = useState<{ n: number; total: number } | null>(null);
+  const [conflicts, setConflicts] = useState<{ next: UploadDraft[]; replace: UploadDraft[] } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+  const longPress = useRef<number | undefined>(undefined);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return files;
@@ -242,19 +287,225 @@ function FilesPanel() {
     setExpanded(all);
   }, [query, filtered]);
 
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [menu]);
+
+  const selectedNode = selected ? findNode(files, selected) : undefined;
+  const targetDir =
+    selectedNode?.type === 'dir'
+      ? selectedNode.path
+      : selectedNode?.type === 'file'
+        ? selectedNode.path.split('/').slice(0, -1).join('/')
+        : '';
+
+  const startCreate = (type: 'file' | 'dir', parent = targetDir) => {
+    setCreating({ type, parent });
+    setDraft('');
+    setError(null);
+    setMenu(null);
+    if (parent) setExpanded((e) => ({ ...e, [parent]: true }));
+  };
+
+  const submitCreate = () => {
+    if (!creating) return;
+    const name = draft.trim();
+    const full = childPath(creating.parent, name);
+    const { files: allFiles, dirs: allDirs } = listTreePaths(files);
+    const check = checkPath(full, { files: allFiles, folders: allDirs });
+    if (!check.ok) {
+      setError(t(PATH_ISSUE_KEY[check.issue], { segment: check.segment ?? '' }));
+      return;
+    }
+    if (creating.type === 'file') {
+      useStore.getState().createFile(check.path);
+      openFile(check.path);
+    } else {
+      useStore.getState().createFolder(check.path);
+      setExpanded((e) => ({ ...e, [check.path]: true }));
+    }
+    setCreating(null);
+    setDraft('');
+    setError(null);
+  };
+
+  const submitRename = (node: FileNode) => {
+    const name = renameDraft.trim();
+    const parent = node.path.split('/').slice(0, -1).join('/');
+    const full = childPath(parent, name);
+    const { files: allFiles, dirs: allDirs } = listTreePaths(files);
+    const check = checkPath(full, {
+      files: allFiles.filter((p) => p !== node.path),
+      folders: allDirs.filter((p) => p !== node.path),
+    });
+    if (!check.ok) {
+      setError(t(PATH_ISSUE_KEY[check.issue], { segment: check.segment ?? '' }));
+      return;
+    }
+    if (check.path !== node.path) useStore.getState().renamePath(node.path, check.path);
+    setRenaming(null);
+    setError(null);
+  };
+
+  const openMenu = (node: FileNode, x: number, y: number) => {
+    setSelected(node.path);
+    setMenu({ node, x: Math.min(x, window.innerWidth - 230), y: Math.min(y, window.innerHeight - 300) });
+  };
+
+  const handleFiles = async (list: File[]) => {
+    if (!list.length) return;
+    const totalSize = list.reduce((sum, f) => sum + f.size, 0);
+    if (totalSize > MAX_UPLOAD_TOTAL) {
+      useStore.getState().toast(t('fs.tooLargeTotal', { limit: formatBytes(MAX_UPLOAD_TOTAL) }));
+      return;
+    }
+    const { files: existingFiles, dirs: existingDirs } = listTreePaths(files);
+    const taken = new Set([...existingFiles, ...existingDirs]);
+    const { files: contentPaths } = listTreePaths(files);
+    const known = new Set(contentPaths);
+    const next: UploadDraft[] = [];
+    const blocked: UploadDraft[] = [];
+    for (let i = 0; i < list.length; i++) {
+      const file = list[i];
+      setUpload({ n: i + 1, total: list.length });
+      if (file.size > MAX_UPLOAD_FILE) {
+        useStore.getState().toast(t('fs.tooLarge', { name: file.name, limit: formatBytes(MAX_UPLOAD_FILE) }));
+        continue;
+      }
+      const relative = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+      const path = childPath(targetDir, relative);
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let entry: UploadDraft;
+      try {
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        entry = { path, text, size: file.size };
+      } catch {
+        entry = { path, binary: { size: file.size, type: file.type || 'application/octet-stream', data: toBase64(bytes) }, size: file.size };
+      }
+      if (taken.has(path) || known.has(path)) blocked.push(entry);
+      else next.push(entry);
+      taken.add(path);
+    }
+    setUpload(null);
+    if (blocked.length) setConflicts({ next, replace: blocked });
+    else if (next.length) useStore.getState().addFiles(next);
+  };
+
+  const resolveConflicts = (choice: 'replace' | 'both' | 'cancel') => {
+    if (!conflicts) return;
+    if (choice === 'cancel') {
+      if (conflicts.next.length) useStore.getState().addFiles(conflicts.next);
+    } else if (choice === 'replace') {
+      useStore.getState().addFiles([...conflicts.next, ...conflicts.replace]);
+    } else {
+      const taken = new Set([...listTreePaths(files).files, ...listTreePaths(files).dirs]);
+      const kept = conflicts.replace.map((entry) => ({ ...entry, path: uniquePath(entry.path, taken) }));
+      kept.forEach((entry) => taken.add(entry.path));
+      useStore.getState().addFiles([...conflicts.next, ...kept]);
+    }
+    setConflicts(null);
+  };
+
+  const createInput = (parent: string) =>
+    creating && creating.parent === parent ? (
+      <div className="px-2 py-1" style={{ paddingInlineStart: 8 + (parent ? parent.split('/').length * 16 : 0) }}>
+        <input
+          autoFocus
+          aria-label={creating.type === 'file' ? t('fs.newFileTitle') : t('fs.newFolderTitle')}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setError(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              submitCreate();
+            }
+            if (e.key === 'Escape') {
+              setCreating(null);
+              setError(null);
+            }
+          }}
+          placeholder={t('fs.namePlaceholder')}
+          className="w-full h-8 px-2 rounded-md text-[14px] outline-none"
+          style={{ background: 'var(--panel)', border: `1px solid ${error ? 'var(--danger)' : 'var(--accent)'}`, color: 'var(--text)' }}
+        />
+        {error ? (
+          <div className="text-[12px] mt-1" role="alert" style={{ color: 'var(--danger)' }}>{error}</div>
+        ) : (
+          <div className="text-[11.5px] mt-1 text-[var(--faint)]">{t('fs.createHint')}</div>
+        )}
+      </div>
+    ) : null;
+
   const renderNode = (node: FileNode, depth: number) => {
     const isOpen = expanded[node.path];
+    if (renaming === node.path) {
+      return (
+        <div key={node.path} className="px-2" style={{ paddingInlineStart: 8 + depth * 16 }}>
+          <input
+            autoFocus
+            aria-label={t('fs.rename')}
+            value={renameDraft}
+            onChange={(e) => {
+              setRenameDraft(e.target.value);
+              setError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submitRename(node);
+              }
+              if (e.key === 'Escape') {
+                setRenaming(null);
+                setError(null);
+              }
+            }}
+            onBlur={() => {
+              setRenaming(null);
+              setError(null);
+            }}
+            className="w-full h-8 px-2 rounded-md text-[14px] outline-none"
+            style={{ background: 'var(--panel)', border: `1px solid ${error ? 'var(--danger)' : 'var(--accent)'}`, color: 'var(--text)' }}
+          />
+          {error ? <div className="text-[12px] mt-1" role="alert" style={{ color: 'var(--danger)' }}>{error}</div> : null}
+        </div>
+      );
+    }
     return (
       <div key={node.path}>
         <button
           type="button"
           onClick={() => {
-            if (node.type === 'dir') setExpanded((e) => ({ ...e, [node.path]: !e[node.path] }));
-            else {
+            if (node.type === 'dir') {
+              setSelected(node.path);
+              setExpanded((e) => ({ ...e, [node.path]: !e[node.path] }));
+            } else {
               setSelected(node.path);
               openFile(node.path);
             }
           }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            openMenu(node, e.clientX, e.clientY);
+          }}
+          onPointerDown={(e) => {
+            if (e.pointerType === 'mouse') return;
+            const x = e.clientX;
+            const y = e.clientY;
+            longPress.current = window.setTimeout(() => openMenu(node, x, y), 500);
+          }}
+          onPointerUp={() => window.clearTimeout(longPress.current)}
+          onPointerLeave={() => window.clearTimeout(longPress.current)}
+          onPointerCancel={() => window.clearTimeout(longPress.current)}
           className={clsx('w-full flex items-center gap-1.5 h-9 pe-2 rounded-md text-[15px] text-start hover:bg-[var(--hover)]')}
           style={{ paddingInlineStart: 8 + depth * 16, background: selected === node.path ? 'var(--elevated)' : undefined }}
           title={node.path}
@@ -281,45 +532,221 @@ function FilesPanel() {
             </span>
           ) : null}
         </button>
-        {node.type === 'dir' && isOpen ? <div>{node.children?.map((c) => renderNode(c, depth + 1))}</div> : null}
+        {node.type === 'dir' && isOpen ? (
+          <div>
+            {createInput(node.path)}
+            {node.children?.length ? (
+              node.children.map((c) => renderNode(c, depth + 1))
+            ) : (
+              <div className="text-[12.5px] text-[var(--faint)]" style={{ paddingInlineStart: 30 + depth * 16 }}>{t('fs.emptyFolder')}</div>
+            )}
+          </div>
+        ) : null}
       </div>
     );
   };
 
   return (
-    <div className="h-full flex flex-col">
+    <div
+      className="h-full flex flex-col"
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        void handleFiles(Array.from(e.dataTransfer.files));
+      }}
+    >
       <div className="flex items-center gap-2 p-3">
         <SearchInput value={query} onValueChange={setQuery} placeholder={t('file.filter')} className="flex-1" />
-        <IBtn label={t('file.newFile')} className="w-10 h-10 rounded-[10px]" onClick={() => newFile()}>
+        <IBtn label={t('file.newFile')} className="w-10 h-10 rounded-[10px]" onClick={() => startCreate('file')}>
           <FilePlus size={19} />
         </IBtn>
-        <IBtn label={t('file.newFolder')} className="w-10 h-10 rounded-[10px]" onClick={() => useStore.getState().toast('New folder')}>
+        <IBtn label={t('file.newFolder')} className="w-10 h-10 rounded-[10px]" onClick={() => startCreate('dir')}>
           <FolderPlus size={19} />
         </IBtn>
-        <IBtn label={t('file.upload')} className="w-10 h-10 rounded-[10px]" onClick={() => useStore.getState().toast('Upload')}>
-          <Upload size={19} />
-        </IBtn>
+        <Menu
+          width={210}
+          trigger={
+            <IBtn label={t('file.upload')} className="w-10 h-10 rounded-[10px]">
+              <Upload size={19} />
+            </IBtn>
+          }
+        >
+          <MenuItem onClick={() => fileInput.current?.click()}>{t('fs.uploadFiles')}</MenuItem>
+          <MenuItem onClick={() => folderInput.current?.click()}>{t('fs.uploadFolder')}</MenuItem>
+        </Menu>
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          className="hidden"
+          aria-label={t('fs.uploadFiles')}
+          onChange={(e) => {
+            void handleFiles(Array.from(e.target.files ?? []));
+            e.target.value = '';
+          }}
+        />
+        <input
+          ref={folderInput}
+          type="file"
+          multiple
+          className="hidden"
+          aria-label={t('fs.uploadFolder')}
+          onChange={(e) => {
+            void handleFiles(Array.from(e.target.files ?? []));
+            e.target.value = '';
+          }}
+          {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+        />
       </div>
-      <div className="flex-1 overflow-y-auto px-2 pb-3">
-        {!files.length ? (
+
+      {upload ? (
+        <div className="px-3 pb-2">
+          <div className="text-[12.5px] text-[var(--muted)] mb-1">
+            {t('fs.uploading', { n: String(upload.n), total: String(upload.total) })}
+          </div>
+          <Progress value={(upload.n / Math.max(1, upload.total)) * 100} />
+        </div>
+      ) : null}
+
+      <div className="flex-1 overflow-y-auto px-2 pb-3 relative">
+        {dragging ? (
+          <div
+            className="absolute inset-2 z-10 grid place-items-center text-[14px] rounded-lg pointer-events-none"
+            style={{ border: '1.5px dashed var(--accent)', background: 'color-mix(in srgb, var(--panel) 92%, transparent)' }}
+          >
+            {t('fs.dropped')}
+          </div>
+        ) : null}
+        {!files.length && !creating ? (
           <div className="text-center px-4 py-10">
             <Folder size={22} className="mx-auto text-[var(--faint)]" />
             <div className="text-[14.5px] font-semibold mt-2">{t('file.empty')}</div>
             <p className="text-[13px] text-[var(--muted)] mt-1">{t('file.emptyBody')}</p>
           </div>
-        ) : filtered.length === 0 ? (
+        ) : filtered.length === 0 && !creating ? (
           <div className="text-center text-[14.5px] text-[var(--muted)] py-8">{t('file.noMatch')}</div>
         ) : (
-          filtered.map((n) => renderNode(n, 0))
+          <>
+            {createInput('')}
+            {filtered.map((n) => renderNode(n, 0))}
+          </>
         )}
       </div>
+
+      {menu ? (
+        <div
+          className="popover-surface fixed z-popover p-1"
+          style={{ left: menu.x, top: menu.y, width: 220, borderRadius: 12 }}
+          role="menu"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {menu.node.type === 'file' ? (
+            <MenuItem onClick={() => openFile(menu.node.path)}>{t('fs.open')}</MenuItem>
+          ) : null}
+          <MenuItem
+            onClick={() => {
+              startCreate('file', menu.node.type === 'dir' ? menu.node.path : menu.node.path.split('/').slice(0, -1).join('/'));
+            }}
+          >
+            {t('fs.newFileHere')}
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              startCreate('dir', menu.node.type === 'dir' ? menu.node.path : menu.node.path.split('/').slice(0, -1).join('/'));
+            }}
+          >
+            {t('fs.newFolderHere')}
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              setRenaming(menu.node.path);
+              setRenameDraft(menu.node.name);
+              setError(null);
+              setMenu(null);
+            }}
+          >
+            {t('fs.rename')}
+          </MenuItem>
+          <MenuItem onClick={() => { useStore.getState().duplicatePath(menu.node.path); setMenu(null); }}>
+            {t('fs.duplicate')}
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              void navigator.clipboard?.writeText(menu.node.path);
+              useStore.getState().toast(t('fs.pathCopied'));
+              setMenu(null);
+            }}
+          >
+            {t('fs.copyPath')}
+          </MenuItem>
+          <MenuItem danger onClick={() => { setDeleting(menu.node); setMenu(null); }}>
+            {t('fs.delete')}
+          </MenuItem>
+        </div>
+      ) : null}
+
+      <Dialog
+        open={Boolean(deleting)}
+        onClose={() => setDeleting(null)}
+        title={deleting ? t('fs.deleteTitle', { name: deleting.name }) : ''}
+        footer={
+          <>
+            <Btn variant="ghost" onClick={() => setDeleting(null)}>{t('common.cancel')}</Btn>
+            <Btn
+              variant="danger"
+              onClick={() => {
+                if (deleting) useStore.getState().deletePath(deleting.path);
+                setDeleting(null);
+              }}
+            >
+              {t('fs.delete')}
+            </Btn>
+          </>
+        }
+      >
+        <p className="text-[14px] text-[var(--muted)]">
+          {deleting
+            ? t('fs.deleteBody', {
+                n: String(
+                  deleting.type === 'file'
+                    ? 1
+                    : listTreePaths([deleting]).files.length,
+                ),
+              })
+            : ''}
+        </p>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(conflicts)}
+        onClose={() => resolveConflicts('cancel')}
+        title={t('fs.conflictTitle')}
+        footer={
+          <>
+            <Btn variant="ghost" onClick={() => resolveConflicts('cancel')}>{t('common.cancel')}</Btn>
+            <Btn variant="outline" onClick={() => resolveConflicts('both')}>{t('fs.keepBoth')}</Btn>
+            <Btn variant="primary" onClick={() => resolveConflicts('replace')}>{t('fs.replace')}</Btn>
+          </>
+        }
+      >
+        <p className="text-[14px] text-[var(--muted)]">
+          {conflicts ? t('fs.conflictBody', { n: String(conflicts.replace.length) }) : ''}
+        </p>
+      </Dialog>
     </div>
   );
 }
 
+
 function EditorPanel({ path }: { path: string }) {
   const { t } = useI18n();
   const contents = useStore((s) => s.fileContents);
+  const binary = useStore((s) => s.binaryFiles[path]);
   const save = useStore((s) => s.saveFile);
   const saved = contents[path] ?? '';
   const [value, setValue] = useState(saved);
@@ -329,6 +756,22 @@ function EditorPanel({ path }: { path: string }) {
     setDiff(false);
   }, [path, contents]);
   const dirty = value !== saved;
+
+  if (binary) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="flex items-center gap-2 px-3 h-10 text-[13px] text-[var(--muted)] border-b border-[var(--line)]">
+          <span dir="ltr" className="truncate">{path}</span>
+        </div>
+        <div className="flex-1 grid place-items-center p-6 text-center">
+          <div className="max-w-[320px]">
+            <FileIcon size={26} className="mx-auto text-[var(--faint)]" />
+            <p className="text-[14px] text-[var(--muted)] mt-3">{t('fs.binary', { size: `${binary.size} B` })}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col">
@@ -357,38 +800,106 @@ function EditorPanel({ path }: { path: string }) {
 }
 
 /* ================================ browser ================================ */
+const isLocalAddress = (value: string): boolean => {
+  try {
+    const url = new URL(value);
+    return (
+      url.hostname === 'localhost' ||
+      url.hostname === '127.0.0.1' ||
+      url.hostname.endsWith('.webcontainer-api.io')
+    );
+  } catch {
+    return false;
+  }
+};
+
+const normalizeAddress = (value: string): string => {
+  const raw = value.trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `https://${raw}`;
+};
+
 function BrowserPanel() {
   const { t } = useI18n();
-  const [url, setUrl] = useState('');
-  const [loaded, setLoaded] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState<string[]>([]);
-  const [idx, setIdx] = useState(-1);
+  const runtime = useRuntime();
+  const previewUrl = runtime.previewUrl ?? '';
+  const [url, setUrl] = useState(previewUrl);
+  const [loaded, setLoaded] = useState<string | null>(previewUrl || null);
+  const [history, setHistory] = useState<string[]>(previewUrl ? [previewUrl] : []);
+  const [idx, setIdx] = useState(previewUrl ? 0 : -1);
+  const [note, setNote] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [busy, setBusy] = useState(false);
 
-  const go = (u: string) => {
-    if (!u.trim()) return;
-    const full = /^https?:|^localhost/.test(u) ? u : `https://${u}`;
-    setLoading(true);
-    window.setTimeout(() => {
-      const next = [...history.slice(0, idx + 1), full];
-      setHistory(next);
-      setIdx(next.length - 1);
-      setLoaded(full);
-      setLoading(false);
-    }, 700);
+  useEffect(() => {
+    if (!previewUrl) return;
+    setUrl((current) => current || previewUrl);
+    setLoaded((current) => current ?? previewUrl);
+    setHistory((current) => (current.includes(previewUrl) ? current : [previewUrl, ...current]));
+    setIdx((current) => (current < 0 ? 0 : current));
+  }, [previewUrl]);
+
+  const go = (raw: string) => {
+    const trimmed = raw.trim();
+    const normalized =
+      /^(localhost|127\.0\.0\.1):5173\/?$/i.test(trimmed) && previewUrl
+        ? previewUrl
+        : normalizeAddress(trimmed);
+    if (!normalized) return;
+    if (!isLocalAddress(normalized)) {
+      window.open(normalized, '_blank', 'noopener,noreferrer');
+      setNote(t('browser.externalNote'));
+      return;
+    }
+    const next = [...history.slice(0, idx + 1), normalized];
+    setHistory(next);
+    setIdx(next.length - 1);
+    setLoaded(normalized);
+    setUrl(normalized);
+    setNote(null);
   };
+
+  const startPreview = () => {
+    const files = useStore.getState().fileContents;
+    setBusy(true);
+    void startPreviewWithRuntime(files)
+      .catch(() => undefined)
+      .finally(() => setBusy(false));
+  };
+
+  const canBack = idx > 0;
+  const canForward = idx >= 0 && idx < history.length - 1;
 
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center gap-1 px-2 h-12 border-b border-[var(--line)] shrink-0">
-        <IBtn label="Back" disabled={idx <= 0} onClick={() => { setIdx(idx - 1); setLoaded(history[idx - 1]); }}>
+        <IBtn
+          label="Back"
+          disabled={!canBack}
+          onClick={() => {
+            const next = idx - 1;
+            setIdx(next);
+            setLoaded(history[next]);
+            setUrl(history[next]);
+          }}
+        >
           <ArrowLeft size={18} />
         </IBtn>
-        <IBtn label="Forward" disabled={idx >= history.length - 1} onClick={() => { setIdx(idx + 1); setLoaded(history[idx + 1]); }}>
+        <IBtn
+          label="Forward"
+          disabled={!canForward}
+          onClick={() => {
+            const next = idx + 1;
+            setIdx(next);
+            setLoaded(history[next]);
+            setUrl(history[next]);
+          }}
+        >
           <ArrowRight size={18} />
         </IBtn>
-        <IBtn label="Reload" onClick={() => loaded && go(loaded)}>
-          {loading ? <X size={17} /> : <RotateCw size={17} />}
+        <IBtn label="Reload" disabled={!loaded} onClick={() => setReloadKey((k) => k + 1)}>
+          <RotateCw size={17} />
         </IBtn>
         <div className="flex-1 min-w-0 relative">
           <Input
@@ -399,65 +910,66 @@ function BrowserPanel() {
             onKeyDown={(e) => e.key === 'Enter' && go(url)}
             icon={loaded ? <Lock size={14} /> : <Search size={15} />}
           />
-          {loading ? <div className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden"><div className="h-full w-1/2 animate-[slide_1s_linear_infinite]" style={{ background: 'var(--accent)' }} /></div> : null}
         </div>
-        <IBtn label="New browser tab" onClick={() => { setLoaded(null); setUrl(''); }}>
-          <Plus size={18} />
-        </IBtn>
-        <IBtn label="Open externally">
+        <IBtn label={t('browser.openExternal')} disabled={!loaded} onClick={() => loaded && window.open(loaded, '_blank', 'noopener,noreferrer')}>
           <ExternalLink size={17} />
         </IBtn>
         <Menu
           trigger={<IBtn label="More"><MoreHorizontal size={18} /></IBtn>}
           width={220}
         >
-          <MenuItem>Zoom 100%</MenuItem>
-          <MenuItem>Desktop site</MenuItem>
-          <MenuItem>Device frame</MenuItem>
-          <MenuItem onClick={() => useStore.getState().toast('Screenshot sent to agent')}>Send screenshot to agent</MenuItem>
-          <MenuItem>DevTools console</MenuItem>
-          <MenuItem danger>Clear cookies</MenuItem>
+          <MenuItem onClick={() => loaded && window.open(loaded, '_blank', 'noopener,noreferrer')}>
+            {t('browser.openExternal')}
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              if (!loaded) return;
+              void navigator.clipboard?.writeText(loaded);
+              useStore.getState().toast(t('browser.copyUrl'));
+            }}
+          >
+            {t('browser.copyUrl')}
+          </MenuItem>
         </Menu>
       </div>
+
+      {note ? (
+        <div className="px-3 py-2 text-[12.5px] border-b border-[var(--line)]" style={{ color: 'var(--muted)' }}>
+          {note}
+        </div>
+      ) : null}
+
       <div className="flex-1 min-h-0 overflow-auto relative">
-        <style>{`@keyframes slide{from{transform:translateX(-100%)}to{transform:translateX(200%)}}`}</style>
-        {!loaded ? (
+        {loaded ? (
+          <iframe
+            key={`${loaded}-${reloadKey}`}
+            title={t('launcher.browser')}
+            src={loaded}
+            className="w-full h-full"
+            style={{ border: 0, background: 'var(--panel)' }}
+          />
+        ) : (
           <div className="h-full grid place-items-center px-6">
-            <div className="text-center max-w-[300px]">
-              <div className="mx-auto mb-4 text-[var(--muted)] w-12 h-12"><Globe size={48} strokeWidth={1.5} /></div>
+            <div className="text-center max-w-[320px]">
+              <div className="mx-auto mb-4 text-[var(--muted)] w-12 h-12">
+                <Globe size={48} strokeWidth={1.5} />
+              </div>
               <h3 className="text-[22px] font-bold text-[var(--muted)]">{t('browser.start')}</h3>
               <p className="text-[15px] text-[var(--muted)] mt-2">{t('browser.startSub')}</p>
-              <div className="flex flex-wrap justify-center gap-2 mt-5">
-                {[
-                  { label: t('browser.localhost'), url: 'localhost:5173' },
-                  { label: t('browser.docs'), url: 'vite.dev' },
-                  { label: t('browser.github'), url: 'github.com' },
-                  { label: t('browser.preview'), url: 'preview.local' },
-                ].map((q) => (
-                  <Chip key={q.label} onClick={() => { setUrl(q.url); go(q.url); }}>{q.label}</Chip>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div dir="ltr" className="min-h-full text-[#1d1d1f]" style={{ background: '#f7f7f5' }}>
-            <div className="h-9 flex items-center px-4 text-[12px] text-[#6b6b66]" style={{ background: '#ececea', borderBottom: '1px solid #ddd' }}>
-              {loaded}
-            </div>
-            <div className="p-8">
-              <div className="max-w-[560px] mx-auto">
-                <div className="text-[12px] tracking-[.14em] uppercase text-[#8a8a84]">Freecode cloud browser</div>
-                <h1 className="text-[34px] font-bold leading-tight mt-2">A rendered page, right inside your workspace.</h1>
-                <p className="mt-3 text-[15px] text-[#55554f] leading-relaxed">
-                  The agent can open pages, click, type and screenshot them here. When the agent takes control the viewport gets a thin accent border.
-                </p>
-                <div className="mt-6 h-40 rounded-xl" style={{ background: 'linear-gradient(135deg,#dbe7d6,#c7d8c0)' }} />
-                <div className="mt-4 grid grid-cols-3 gap-3">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-16 rounded-lg" style={{ background: '#e9e9e4' }} />
-                  ))}
-                </div>
-              </div>
+              {previewUrl ? (
+                <Btn variant="primary" className="mt-4" onClick={() => go(previewUrl)}>
+                  {t('browser.preview')}
+                </Btn>
+              ) : runtimeSupport() === 'full' ? (
+                <>
+                  <p className="text-[13px] text-[var(--faint)] mt-3">{t('browser.noPreviewYet')}</p>
+                  <Btn variant="primary" className="mt-3" disabled={busy} onClick={startPreview}>
+                    {busy ? t('runtime.previewStarting') : t('browser.startPreview')}
+                  </Btn>
+                </>
+              ) : (
+                <p className="text-[13px] text-[var(--faint)] mt-3">{t('browser.notRunning')}</p>
+              )}
             </div>
           </div>
         )}
@@ -565,6 +1077,7 @@ function PreviewPanel() {
 /* ================================ terminal ================================ */
 export function TerminalPanel({ compact }: { compact?: boolean }) {
   const { t } = useI18n();
+  const files = useStore((s) => s.fileContents);
   const [tabs, setTabs] = useState(['Terminal']);
   const [active, setActive] = useState(0);
 
@@ -609,6 +1122,7 @@ export function TerminalPanel({ compact }: { compact?: boolean }) {
             shell={runtimeSupport() === 'full'}
             starting={t('runtime.shellStarting')}
             failed={t('runtime.shellFailed')}
+            files={files}
           />
         </Suspense>
       </div>
@@ -622,6 +1136,7 @@ function OverviewPanel() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId));
   const git = useStore((s) => s.git);
   const usage = useStore((s) => s.sessionUsage);
+  const fsLog = useStore((s) => s.fsLog);
   const openTool = useStore((s) => s.openTool);
   const additions = git.files.reduce((a, f) => a + f.additions, 0);
   const deletions = git.files.reduce((a, f) => a + f.deletions, 0);
@@ -659,15 +1174,23 @@ function OverviewPanel() {
         {[
           { label: t('overview.filesChanged'), value: `${git.files.length}`, sub: `+${additions} −${deletions}`, onClick: () => openTool('changes') },
           { label: t('overview.commandsRun'), value: `${actions.filter((a) => a.kind === 'cmd').length}`, sub: t('overview.fromThisChat'), onClick: () => openTool('terminal') },
-          { label: t('overview.context'), value: `${usage.context}%`, sub: t('overview.tokens', { n: String(usage.tokens) }), onClick: () => {} },
-          { label: t('overview.cost'), value: `$${usage.cost.toFixed(2)}`, sub: t('overview.thisSession'), onClick: () => {} },
-        ].map((c) => (
-          <button key={c.label} type="button" onClick={c.onClick} className="card p-3 text-start">
-            <div className="text-[13px] text-[var(--muted)]">{c.label}</div>
-            <div className="text-[24px] font-bold mt-1">{c.value}</div>
-            <div className="text-[12px] text-[var(--faint)]">{c.sub}</div>
-          </button>
-        ))}
+          { label: t('overview.context'), value: `${usage.context}%`, sub: t('overview.tokens', { n: String(usage.tokens) }) },
+          { label: t('overview.cost'), value: `$${usage.cost.toFixed(2)}`, sub: t('overview.thisSession') },
+        ].map((c) =>
+          c.onClick ? (
+            <button key={c.label} type="button" onClick={c.onClick} className="card p-3 text-start">
+              <div className="text-[13px] text-[var(--muted)]">{c.label}</div>
+              <div className="text-[24px] font-bold mt-1">{c.value}</div>
+              <div className="text-[12px] text-[var(--faint)]">{c.sub}</div>
+            </button>
+          ) : (
+            <div key={c.label} className="card p-3 text-start">
+              <div className="text-[13px] text-[var(--muted)]">{c.label}</div>
+              <div className="text-[24px] font-bold mt-1">{c.value}</div>
+              <div className="text-[12px] text-[var(--faint)]">{c.sub}</div>
+            </div>
+          ),
+        )}
       </div>
 
       {!messages.length ? (
@@ -695,6 +1218,23 @@ function OverviewPanel() {
           </div>
         </div>
       )}
+
+      <div className="mt-5">
+        <SectionTitle icon={<Folder size={18} />} title={t('overview.fileActivity')} />
+        <div className="card mt-2 divide-y divide-[var(--line)]">
+          {fsLog.length ? (
+            fsLog.slice(0, 12).map((entry) => (
+              <div key={entry.id} className="flex items-center gap-2.5 px-3 py-2.5 text-[13.5px]">
+                <span className="text-[var(--muted)]">{entry.op}</span>
+                <span className="flex-1 truncate font-mono text-[12px]" dir="ltr">{entry.path}</span>
+                <span className="text-[11px] text-[var(--faint)]">{new Date(entry.at).toLocaleTimeString()}</span>
+              </div>
+            ))
+          ) : (
+            <div className="px-3 py-4 text-[13.5px] text-[var(--muted)]">{t('overview.noFileActivity')}</div>
+          )}
+        </div>
+      </div>
 
       <div className="mt-5">
         <SectionTitle icon={<History size={18} />} title={t('overview.checkpoints')} />
@@ -750,7 +1290,7 @@ function DiffView({ file, onClose }: { file: ChangedFile; onClose: () => void })
         <IBtn label={t('common.copy')} onClick={() => void navigator.clipboard?.writeText(file.path)}><Copy size={16} /></IBtn>
       </div>
       <div className="flex-1 min-h-0 overflow-auto font-mono text-[12.5px] leading-[1.55]" dir="ltr">
-        {file.hunks.map((h, hi) => (
+        {file.hunks.map((h) => (
           <div key={h.id} className="relative group/hunk" style={{ opacity: h.state === 'rejected' ? 0.35 : 1, transition: 'opacity .16s' }}>
             <div className="flex items-center justify-between px-3 py-1.5 sticky top-0 z-10" style={{ background: 'var(--panel-2)', borderBottom: '1px solid var(--line)' }}>
               <span className="text-[var(--muted)]">{h.header}</span>
@@ -788,18 +1328,8 @@ function DiffView({ file, onClose }: { file: ChangedFile; onClose: () => void })
                 </span>
               </div>
             ))}
-            {hi === 0 ? (
-              <button type="button" className="w-full text-start px-6 py-1.5 text-[12px] text-[var(--muted)]" style={{ background: 'var(--panel-2)' }} onClick={() => useStore.getState().toast('Unchanged lines expanded')}>
-                Show 24 unchanged lines
-              </button>
-            ) : null}
           </div>
         ))}
-      </div>
-      <div className="flex items-center gap-2 px-3 py-2 border-t border-[var(--line)]">
-        <Btn size="sm" variant="ghost" disabled>← {t('changes.previous')}</Btn>
-        <span className="text-[12.5px] text-[var(--muted)] mx-auto">{t('changes.fileOf', { n: 2, total: 7 })}</span>
-        <Btn size="sm" variant="ghost" disabled>{t('changes.next')} →</Btn>
       </div>
     </div>
   );
@@ -951,8 +1481,9 @@ function ChangesPanel() {
               <button
                 type="button"
                 aria-label="Generate commit message"
-                onClick={() => useStore.getState().toast(t('changes.generateUnavailable'))}
-                className="absolute top-2 end-2 text-[var(--muted)] hover:text-[var(--accent)]"
+                disabled
+                title={t('changes.generateUnavailable')}
+                className="absolute top-2 end-2 text-[var(--faint)] opacity-50 cursor-not-allowed"
               >
                 <Sparkles size={17} />
               </button>
@@ -974,8 +1505,8 @@ function ChangesPanel() {
                   width={210}
                 >
                   <MenuItem onClick={() => { commit(msg); setMsg(''); push(); }}>Commit &amp; push</MenuItem>
-                  <MenuItem onClick={() => { commit(msg); setMsg(''); }}>Commit &amp; create PR</MenuItem>
-                  <MenuItem onClick={() => setMsg(`${msg} (amend)`)}>{t('changes.amend')}</MenuItem>
+                  <MenuItem disabled reason={t('toolbar.githubUnavailable')}>Commit &amp; create PR</MenuItem>
+                  <MenuItem disabled reason={t('changes.amendUnavailable')}>{t('changes.amend')}</MenuItem>
                 </Menu>
               </div>
             </div>
@@ -986,7 +1517,7 @@ function ChangesPanel() {
       {tab === 'history' ? (
         <div className="flex-1 overflow-y-auto p-2">
           {git.commits.map((c) => (
-            <button key={c.hash} type="button" className="w-full flex items-start gap-2.5 px-2 py-2.5 rounded-lg hover:bg-[var(--hover)] text-start" onClick={() => useStore.getState().toast(`Opened ${c.hash}`)}>
+            <div key={c.hash} className="w-full flex items-start gap-2.5 px-2 py-2.5 rounded-lg text-start">
               <GitCommitHorizontal size={16} className="text-[var(--muted)] mt-0.5" />
               <div className="flex-1 min-w-0">
                 <div className="text-[14px] truncate">{c.message}</div>
@@ -995,7 +1526,7 @@ function ChangesPanel() {
                 </div>
               </div>
               <span className="badge font-mono">{c.hash}</span>
-            </button>
+            </div>
           ))}
         </div>
       ) : null}
