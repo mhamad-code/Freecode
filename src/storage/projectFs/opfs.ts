@@ -48,8 +48,9 @@ export class OpfsFS implements ProjectFS {
   async list(dir: string): Promise<FSStat[]> {
     const handle = await this.dir(dir, false);
     const out: FSStat[] = [];
+    const base = safePath(dir);
     for await (const [name, entry] of (handle as unknown as DirEntries).entries()) {
-      const path = safePath(`${safePath(dir)}/${name}`);
+      const path = safePath(base ? `${base}/${name}` : name);
       if (entry.kind === 'directory') {
         out.push({ path, type: 'dir', size: 0, mtime: 0 });
       } else {
@@ -103,7 +104,7 @@ export class OpfsFS implements ProjectFS {
 
   private async walkDir(handle: FileSystemDirectoryHandle, prefix: string, out: FSStat[]) {
     for await (const [name, entry] of (handle as unknown as DirEntries).entries()) {
-      const path = safePath(`${prefix}/${name}`);
+      const path = safePath(prefix ? `${prefix}/${name}` : name);
       if (entry.kind === 'directory') {
         await this.walkDir(entry as FileSystemDirectoryHandle, path, out);
       } else {

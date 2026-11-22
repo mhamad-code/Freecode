@@ -6,9 +6,10 @@ Browser-only agent. No server of ours. Model traffic is `fetch` from the tab to 
 UI (React) ──► store.send ──► lib/agentClient.local.ts ──► engine/agent/loop.ts
                                    │
                                    ├─ engine/providers/registry.ts ─► SSE parser ─► adapters
-                                   ├─ engine/agent/tools/*  ─► storage/projectFs (OPFS | IDB | memory)
+                                   ├─ engine/agent/tools/*  ─► lib/projectBridge.ts ─► storage/projectFs (OPFS | IDB)
 ├─ runtime/*  ─► WebContainer (lazy) ─► jsh shell + static preview server
-                                   ├─ engine/agent/permissions.ts + checkpoints.ts
+                                   ├─ engine/agent/permissions.ts + lib/checkpoints.ts (restore)
+                                   ├─ store.writeProjectFile ─► syncFile ─► container
                                    └─ storage/vault.ts (AES-GCM keys)
 ```
 
@@ -38,7 +39,9 @@ UI (React) ──► store.send ──► lib/agentClient.local.ts ──► eng
 | `src/storage/vault.ts` | AES-GCM 256 device key in IndexedDB + PBKDF2 passphrase verifier helpers. |
 | `src/storage/projectFs/*` | `ProjectFS` contract, path safety, SHA-256 snapshots, OPFS primary + IndexedDB fallback + in-memory backend. |
 | `src/storage/migrations.ts` | Numbered, pure data migrations. |
-| `src/lib/agentClient.local.ts` | Implements the live turn for the UI using the registry and the in-memory project FS. |
+| `src/lib/agentClient.local.ts` | Implements the live turn for the UI using the registry and the session's persisted `ProjectFS`; mounts the editor's files before the turn and reports every write back. |
+| `src/lib/projectBridge.ts` | One cached `ProjectFS` per session (`createProjectFs`) plus `mountProjectFiles`/`readProjectFile`, shared by the agent and the store. |
+| `src/lib/checkpoints.ts` | Per-turn file snapshots (capped, in memory), `diffContents` and `treeFromContents` for restore. |
 | `src/lib/providersStore.ts` | Provider configs in `localStorage`; keys in the vault. |
 | `src/lib/backup.ts` | Local backup export/import (JSON). |
 | `src/lib/brandLogos.ts` | `simple-icons` marks keyed by our integration/provider ids, their brand hex, and `NO_BRAND_LOGO` for the brands the package does not ship. |

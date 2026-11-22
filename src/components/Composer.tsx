@@ -70,6 +70,8 @@ export function Composer() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId))!;
   const send = useStore((s) => s.send);
   const stop = useStore((s) => s.stop);
+  const enqueue = useStore((s) => s.enqueue);
+  const removeQueued = useStore((s) => s.removeQueued);
   const setDraft = useStore((s) => s.setDraft);
   const setMode = useStore((s) => s.setSessionMode);
   const setModel = useStore((s) => s.setModel);
@@ -80,7 +82,6 @@ export function Composer() {
   const files = useStore((s) => s.files);
   const [text, setText] = useState(session.draft);
   const [menu, setMenu] = useState<'slash' | 'mention' | null>(null);
-  const [queued, setQueued] = useState<string[]>([]);
   const [dictating, setDictating] = useState(false);
   const [drag, setDrag] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
@@ -124,14 +125,6 @@ export function Composer() {
     el.style.height = 'auto';
     el.style.height = `${Math.min(170, Math.max(66, el.scrollHeight))}px`;
   }, [text]);
-
-  useEffect(() => {
-    if (!running && queued.length) {
-      const next = queued[0];
-      setQueued((q) => q.slice(1));
-      send(next);
-    }
-  }, [running, queued, send]);
 
   useEffect(() => {
     if (!dictating) return;
@@ -183,9 +176,10 @@ export function Composer() {
     const v = (value ?? text).trim();
     if (!v) return;
     if (running) {
-      setQueued((q) => [...q, v]);
+      enqueue(v);
       setText('');
       setDraft('');
+      setMenu(null);
       return;
     }
     setError(false);
@@ -241,12 +235,16 @@ export function Composer() {
             boxShadow: '0 3px 0 var(--edge)',
           }}
         >
-          {queued.length ? (
+          {session.queued.length ? (
             <div className="flex flex-wrap gap-1.5 mb-2">
-              {queued.map((q, i) => (
-                <span key={i} className="badge badge-info gap-1.5">
+              {session.queued.map((q, i) => (
+                <span key={`${i}-${q}`} className="badge badge-info gap-1.5">
                   {t('chat.queued')}: {q.slice(0, 24)}
-                  <button type="button" aria-label="Remove" onClick={() => setQueued((x) => x.filter((_, j) => j !== i))}>
+                  <button
+                    type="button"
+                    aria-label={t('chat.removeQueued')}
+                    onClick={() => removeQueued(i)}
+                  >
                     <X size={12} />
                   </button>
                 </span>

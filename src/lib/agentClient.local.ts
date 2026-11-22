@@ -13,8 +13,8 @@ import {
   toLiteRequest,
 } from '../engine/providers/lite';
 import type { ChatMessage, Delta } from '../engine/providers/types';
-import { decode, type ProjectFS } from '../storage/projectFs';
-import { MemoryFS } from '../storage/projectFs/memory';
+import { decode } from '../storage/projectFs';
+import { mountProjectFiles, projectFsFor, readProjectFile } from './projectBridge';
 import { registryFor, loadProviders, saveProviders, secretFor } from './providersStore';
 import { buildCatalog, findModel, flattenCatalog, pickDefaultModel } from './modelCatalog';
 import { NoWorkingModelError, recordHealth, resolveWorkingModel } from './modelProbe';
@@ -38,18 +38,14 @@ export interface LiveTurnOptions {
   model?: string;
   onEvent: (event: AgentEvent) => void;
   ask: (req: AskRequest) => Promise<'allow' | 'deny'>;
+  /** The project's files as the editor has them; mounted before the turn. */
+  files?: Record<string, string>;
+  /** Called after a write/edit tool lands, so the store can show it at once. */
+  onFileWrite?: (path: string, contents: string) => void;
   signal?: AbortSignal;
 }
 
-const fsBySession = new Map<string, ProjectFS>();
 
-async function sessionFs(sessionId: string): Promise<ProjectFS> {
-  const existing = fsBySession.get(sessionId);
-  if (existing) return existing;
-  const fs = new MemoryFS();
-  fsBySession.set(sessionId, fs);
-  return fs;
-}
 
 export interface LiveProviderChoice {
   providerId: string;
@@ -104,9 +100,16 @@ export async function runLiveTurn(opts: LiveTurnOptions): Promise<{ text: string
   } else if (replyOnly) {
     opts.onEvent({ type: 'banner', text: translate(opts.lang, 'model.replyOnly') });
   }
-  const fs = await sessionFs(opts.sessionId);
+  const fs = await projectFsFor(opts.sessionId);
+  await mountProjectFiles(fs, opts.files ?? {});
   const guard = new WriteGuard();
   const io = { fs, guard };
+
+  /** Mirrors a file the agent just changed into the editor's store. */
+  const publish = async (path: string) => {
+    const contents = await readProjectFile(fs, path);
+    if (contents !== undefined) opts.onFileWrite?.(path, contents);
+  };
 
   const readAll = async () => {
     const files: Record<string, string> = {};
@@ -178,6 +181,7 @@ export async function runLiveTurn(opts: LiveTurnOptions): Promise<{ text: string
       risk: 'medium',
       run: async (args) => {
         const result = await writeFileTool(io, String(args.path ?? ''), String(args.content ?? ''));
+        await publish(result.path);
         return `Wrote ${result.path}`;
       },
     },
@@ -197,6 +201,7 @@ export async function runLiveTurn(opts: LiveTurnOptions): Promise<{ text: string
           String(args.old_str ?? ''),
           String(args.new_str ?? ''),
         );
+        await publish(result.path);
         return `Edited ${result.path} (${result.matches} match${result.matches === 1 ? '' : 'es'})`;
       },
     },

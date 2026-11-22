@@ -44,6 +44,8 @@ export interface AssistantTurn {
   permission?: Permission;
   collapsed: boolean;
   checkpoint?: { id: string; label: string; files: number };
+  /** Set when a failed turn left the project different from its checkpoint. */
+  recovery?: { changed: number };
 }
 
 export type UserMessage = { id: string; role: 'user'; kind: 'user'; text: string; at: number };
@@ -58,6 +60,8 @@ export interface Session {
   status: 'idle' | 'running' | 'waiting' | 'error';
   mode: Mode;
   draft: string;
+  /** Messages typed while a turn is running, sent one per finished turn. */
+  queued: string[];
   model: string;
   effort: Effort;
   updatedAt: number;

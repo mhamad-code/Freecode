@@ -57,16 +57,36 @@ Verified in this workspace:
 - **`crossOriginIsolated` on production is `true`.** In Chrome 156 on `https://freecode-2j3.pages.dev` (deployment `efca4af7`, source `d6ac853`; it was first observed on `da60df30`/`14751e1`), `crossOriginIsolated === true` and `typeof SharedArrayBuffer === 'function'`; the document answers with `cross-origin-opener-policy: same-origin` and `cross-origin-embedder-policy: credentialless`. This closes the F1–F3 open item.
 - `npx tsc -b` clean; `npx vitest run` **139/139**, including 10 new runtime tests (file-tree mapping, preview server source is valid JavaScript and listens on the requested port, path-traversal guard, listing fallback, state store, and a scan that no app file statically imports `@webcontainer/api`).
 - `npm run build` ok: the entry is 517.1 kB (158.4 kB gzip) and the WebContainer client ships as its own 12.2 kB chunk; the entry chunk contains no `webcontainer` string. `node scripts/check-bundle.mjs` clean.
+- **Verified on production itself** (`https://freecode-2j3.pages.dev`, deployment `efca4af7`) in Chrome 156: `crossOriginIsolated === true`, `typeof SharedArrayBuffer === 'function'`, secure context; the Terminal tab attached to the container's `jsh` and ran `node -v` → `v24.22.2`, `pwd` → `/home/project`, and `cat index.html` after writing it; “Live preview” started the in-container server and its iframe (`https://<id>-bsfl--5173--<id>.local-credentialless.webcontainer-api.io/`) rendered the page that had just been written in that shell. Screenshots: `docs/verification/f5-prod-shell.png`, `docs/verification/f5-prod-preview.png`.
 - Real Chromium against the production build through `scripts/serve-dist.mjs`: the terminal booted `jsh` inside the container and executed `ls -la`, `echo "<h1>…</h1>" > index.html && cat index.html` with real output; a file created with “New file” and saved in the editor (`notes.md`) was readable inside the container with its content; “Start preview” launched the in-container static server, the panel showed the `…-5173--….local-credentialless.webcontainer-api.io` URL in an iframe, and that iframe rendered the mounted `index.html`. No console errors or warnings were captured.
 
 Not verified / still missing:
 
 - **The preview is a static server, not a dev server.** It serves the mounted files on 5173; it does not run `npm install`, `npm run dev`, or any framework build step, so a project that needs a bundler will not preview yet.
 - **The container file system is not persistent.** Files are mounted from the store at boot and saves are written through while the runtime lives, but a reload starts from the store again. The Files list still comes from `useStore`, not from OPFS, so file-list persistence and OPFS hydration remain F6 work.
-- **The agent still edits an in-memory `ProjectFS`.** Its files are not the container's files, so agent edits do not appear in the preview or the shell until F5 reunites them.
+- **F4 alone did not connect the agent to the container.** The agent edited its own `ProjectFS`; F5 (below) moved it onto a persisted OPFS/IndexedDB FS and pushes each write through `syncFile`, which is what makes agent edits show up in the shell and the preview.
 - **Isolation depends on how the page is served.** Cloudflare Pages and `serve-dist.mjs` set COOP/COEP; a bare `vite dev` page is not isolated and therefore shows the limited banner and no shell. The `*.style.dev` preview is isolated only when it serves the built `dist/`.
 - The preview was inspected at desktop width only; the 320 px phone frame clips long headings, and no phone-sized interaction test was run.
 - `printf` is not available in `jsh` (use `echo` or `node -e`); that is a shell quirk of the container, not an app feature.
+
+## F5 — agent over the real project FS, checkpoints, recovery, steering (this build)
+
+Verified in this workspace:
+
+- `npx tsc -b` clean; `npx vitest run` **150/150**, including 7 new checkpoint tests (`src/lib/__tests__/checkpoints.test.ts`: snapshot isolation from later store writes, per-session ordering, the 20-entry cap, content diff, tree rebuild) and 4 store integration tests (`src/__tests__/storeCheckpoints.test.ts`: agent write → tree + contents, code restore dropping new files, conversation-only restore, queueing a message typed during a run).
+- `npm run build` ok: the entry is 521.9 kB (159.8 kB gzip), with `opfs` (2.5 kB) and `idb` (3.6 kB) as separate chunks reached through the existing dynamic `createProjectFs`. `node scripts/check-bundle.mjs` clean.
+- **The browser FS is real.** In the dev build, `projectBridge` opened `OpfsFS`; mounting two files returned `written: 2`, a second mount of identical contents returned `0`, `readProjectFile` returned the text, and `walk()`/`list('')` returned `index.html`, `notes/a.txt` and `notes` with relative paths.
+- **Checkpoint restore works through the UI** (real Chromium, real store, state seeded through the app's own modules): the marker read `Checkpoint · 1 file`, the dialog read “This checkpoint holds 1 file, and 2 of them differ from the project right now”, and choosing “Restore code only” put `index.html` back to `<h1>before</h1>`, deleted the post-checkpoint `about.html`, kept the two messages, and removed the marker’s changed count.
+- **Recovery card**: a failed turn whose checkpoint differed by one file rendered “This run failed after editing files / The project differs from the checkpoint taken before the run: 1 file.”; “Restore files” removed that file, cleared the card and the turn’s recovery flag.
+- **Steering queue**: typing during a running turn showed a `Queued: …` chip in the composer, cleared the box, and after the session went idle the queue drained into a new user message (the turn then failed with the honest “no working model” card, which is the provider situation, not the queue).
+- Fixed a real defect found by this check: `OpfsFS.list()` and `walk()` built `/name` for top-level entries and threw `Absolute paths are not allowed`, which would have broken the agent’s `grep` and checkpoint snapshots on OPFS.
+
+Not verified / still missing:
+
+- **No end-to-end agent turn ran on a provider.** Every free model was rejected by its provider in this environment (“No working free model right now”), so the write-through was exercised by calling the same bridge the tools use (`writeProjectFile`, `mountProjectFiles`), not by a model-issued `write_file`. A live turn over a configured key is still unverified.
+- **Checkpoints live in memory.** They are captured per turn and capped at 20 per session, but nothing persists them or the conversation yet, so a reload loses both (F6).
+- **Restore scopes are coarse.** “Conversation only” only drops the messages; “code only”/“both” replace the whole file set with the snapshot, so a file the user edited by hand after the turn is reverted too.
+- Restored and agent-written files reach the container only while the runtime is booted (`syncFile` is a no-op before boot).
 
 ## F0 — demo data removal (this build)
 

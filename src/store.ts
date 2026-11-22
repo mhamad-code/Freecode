@@ -31,7 +31,13 @@ import { translate } from './lib/i18n';
 import { isMockMode } from './lib/modelCatalog';
 import type { PermissionMode } from './engine/agent/permissions';
 import { ERROR_HINT, ProviderError } from './engine/providers/errors';
-import { syncFile } from './runtime/workspace';
+import { removeFile, syncFile } from './runtime/workspace';
+import {
+  captureCheckpoint,
+  diffContents,
+  getCheckpoint,
+  treeFromContents,
+} from './lib/checkpoints';
 
 export interface Settings {
   advancedMode: boolean;
@@ -57,6 +63,38 @@ const liveControllers = new Map<string, AbortController>();
 const permissionWaiters = new Map<string, (d: 'allow-once' | 'allow-always' | 'deny') => void>();
 
 const touch = (s: Session): Session => ({ ...s, updatedAt: Date.now() });
+
+/** Adds a file (and its folders) to the tree without opening it. */
+const insertPath = (nodes: FileNode[], path: string, status: 'A' | 'M'): FileNode[] => {
+  const parts = path.split('/').filter(Boolean);
+  const visit = (level: FileNode[], depth: number): FileNode[] => {
+    const name = parts[depth];
+    const full = parts.slice(0, depth + 1).join('/');
+    if (depth === parts.length - 1) {
+      const existing = level.find((n) => n.type === 'file' && n.path === full);
+      if (existing) return level.map((n) => (n === existing ? { ...n, status } : n));
+      return [...level, { name, path: full, type: 'file', status }];
+    }
+    const dir = level.find((n) => n.type === 'dir' && n.path === full);
+    if (dir) {
+      return level.map((n) =>
+        n === dir ? { ...n, children: visit(n.children ?? [], depth + 1) } : n,
+      );
+    }
+    return [...level, { name, path: full, type: 'dir', children: visit([], depth + 1) }];
+  };
+  return visit(nodes, 0);
+};
+
+/** Sends the next queued message once the current turn has finished. */
+function drainQueue(get: () => AppStore) {
+  const state = get();
+  const session = state.sessions.find((s) => s.id === state.activeSessionId);
+  if (!session || session.status === 'running' || !session.queued.length) return;
+  const next = session.queued[0];
+  state.removeQueued(0);
+  state.send(next);
+}
 
 const patchTurn = (
   sessions: Session[],
@@ -131,6 +169,13 @@ interface AppStore {
   dockHeight: number;
   setDockHeight: (h: number) => void;
 
+  enqueue: (text: string) => void;
+  removeQueued: (index: number) => void;
+  restoreCheckpoint: (turnId: string, scope: 'both' | 'code' | 'chat') => void;
+  dismissRecovery: (turnId: string) => void;
+  /** A file written by the agent, mirrored into the editor. */
+  writeProjectFile: (path: string, contents: string) => void;
+
   files: FileNode[];
   openFilePath: string | null;
   openFile: (path: string) => void;
@@ -177,6 +222,7 @@ const newChatSession = (): Session => ({
   status: 'idle',
   mode: 'build',
   draft: '',
+  queued: [],
   model: '',
   effort: 'high',
   updatedAt: Date.now(),
@@ -248,7 +294,10 @@ export const useStore = create<AppStore>((set, get) => ({
 
   sessions: [initialSession],
   activeSessionId: initialSession.id,
-  setActiveSession: (id) => set({ activeSessionId: id, drawerOpen: false }),
+  setActiveSession: (id) => {
+    set({ activeSessionId: id, drawerOpen: false });
+    setTimeout(() => drainQueue(get), 0);
+  },
   newSession: () => {
     const s = newChatSession();
     set((st) => ({ sessions: [...st.sessions, s], activeSessionId: s.id, drawerOpen: false, toolOpen: false }));
@@ -288,7 +337,11 @@ export const useStore = create<AppStore>((set, get) => ({
     const st = get();
     const sid = st.activeSessionId;
     const session = st.sessions.find((s) => s.id === sid);
-    if (!session || session.status === 'running') return;
+    if (!session) return;
+    if (session.status === 'running') {
+      get().enqueue(text);
+      return;
+    }
     const turnId = uid();
     const userMsg: Message = { id: uid(), role: 'user', kind: 'user', text, at: Date.now() };
     const assistant: AssistantMessage = {
@@ -303,7 +356,6 @@ export const useStore = create<AppStore>((set, get) => ({
         running: true,
         startedAt: Date.now(),
         collapsed: false,
-        checkpoint: { id: `cp-${turnId}`, label: 'Before this run', files: Math.floor(rand(3, 12)) },
       },
     };
     set((s) => ({
@@ -328,12 +380,41 @@ export const useStore = create<AppStore>((set, get) => ({
       // pretend demo answer.
       if (!isMockMode()) {
         if (token !== runToken) return;
+        // Snapshot the project before the agent can touch it.
+        const checkpoint = captureCheckpoint(
+          sid,
+          translate(get().lang, 'checkpoint.label'),
+          get().fileContents,
+        );
+        set((s) => ({
+          sessions: patchTurn(s.sessions, sid, turnId, (t) => {
+            t.checkpoint = {
+              id: checkpoint.id,
+              label: checkpoint.label,
+              files: Object.keys(checkpoint.files).length,
+            };
+          }),
+        }));
         await runLive(sid, turnId, text, mode, session.model, token, set, get);
         return;
       }
       if (token !== runToken) return;
       const { buildScenario } = await import('./lib/mock/scenario');
       if (token !== runToken) return;
+      const demoCheckpoint = captureCheckpoint(
+        sid,
+        translate(get().lang, 'checkpoint.label'),
+        get().fileContents,
+      );
+      set((s) => ({
+        sessions: patchTurn(s.sessions, sid, turnId, (t) => {
+          t.checkpoint = {
+            id: demoCheckpoint.id,
+            label: demoCheckpoint.label,
+            files: Object.keys(demoCheckpoint.files).length,
+          };
+        }),
+      }));
       void runScenario(sid, turnId, buildScenario(text, mode, get().lang), token, set, get);
     })();
   },
@@ -476,6 +557,98 @@ export const useStore = create<AppStore>((set, get) => ({
       void syncFile(path, content);
       return { fileContents: { ...s.fileContents, [path]: content }, files: walk(s.files) };
     }),
+
+  enqueue: (text) => {
+    const value = text.trim();
+    if (!value) return;
+    set((s) => ({
+      sessions: s.sessions.map((x) =>
+        x.id === s.activeSessionId ? touch({ ...x, queued: [...x.queued, value] }) : x,
+      ),
+    }));
+  },
+  removeQueued: (index) =>
+    set((s) => ({
+      sessions: s.sessions.map((x) =>
+        x.id === s.activeSessionId
+          ? touch({ ...x, queued: x.queued.filter((_, i) => i !== index) })
+          : x,
+      ),
+    })),
+
+  writeProjectFile: (path, contents) =>
+    set((s) => {
+      if (s.fileContents[path] === contents) return {};
+      void syncFile(path, contents);
+      const known = s.fileContents[path] !== undefined;
+      return {
+        fileContents: { ...s.fileContents, [path]: contents },
+        files: known ? insertPath(s.files, path, 'M') : insertPath(s.files, path, 'A'),
+      };
+    }),
+
+  dismissRecovery: (turnId) =>
+    set((s) => ({
+      sessions: patchTurn(s.sessions, s.activeSessionId, turnId, (t) => {
+        t.recovery = undefined;
+      }),
+    })),
+
+  restoreCheckpoint: (turnId, scope) => {
+    const state = get();
+    const sid = state.activeSessionId;
+    const session = state.sessions.find((s) => s.id === sid);
+    if (!session) return;
+    const message = session.messages.find(
+      (m) => m.kind === 'assistant' && m.turn.id === turnId,
+    );
+    const checkpointId = message && message.kind === 'assistant' ? message.turn.checkpoint?.id : undefined;
+    const record = checkpointId ? getCheckpoint(checkpointId) : undefined;
+    if (!record) return;
+    const files = record.files;
+    const removed = Object.keys(state.fileContents).filter((path) => !(path in files));
+
+    if (scope === 'code' || scope === 'both') {
+      for (const path of removed) {
+        void removeFile(path);
+      }
+      for (const [path, contents] of Object.entries(files)) {
+        void syncFile(path, contents);
+      }
+    }
+
+    set((s) => {
+      const sessions = s.sessions.map((x) => {
+        if (x.id !== sid) return x;
+        let messages = x.messages;
+        if (scope === 'chat' || scope === 'both') {
+          const index = messages.findIndex((m) => m.kind === 'assistant' && m.turn.id === turnId);
+          if (index >= 0) {
+            const cut = index > 0 && messages[index - 1].kind === 'user' ? index - 1 : index;
+            messages = messages.slice(0, cut);
+          }
+        }
+        const turns = messages.map((m) =>
+          m.kind === 'assistant' && m.turn.recovery
+            ? { ...m, turn: { ...m.turn, recovery: undefined } }
+            : m,
+        );
+        return touch({ ...x, messages: turns });
+      });
+      const codeRestored = scope === 'code' || scope === 'both';
+      return {
+        sessions,
+        ...(codeRestored
+          ? { files: treeFromContents(files), fileContents: { ...files } }
+          : {}),
+      };
+    });
+    if (scope !== 'chat') {
+      state.toast(
+        translate(state.lang, 'checkpoint.restored', { count: Object.keys(files).length }),
+      );
+    }
+  },
 
   git: EMPTY_GIT,
   toggleStage: (path) =>
@@ -775,6 +948,11 @@ async function runLive(
       model,
       lang: get().lang,
       permissionMode,
+      files: get().fileContents,
+      onFileWrite: (path, contents) => {
+        if (!alive()) return;
+        get().writeProjectFile(path, contents);
+      },
       signal: controller.signal,
       ask: async (req: AskRequest) => {
         if (!alive()) return 'deny';
@@ -868,6 +1046,16 @@ async function runLive(
     const message = err instanceof Error ? err.message : String(err);
     const stopped = code === 'aborted';
     const noModel = err instanceof NoWorkingModelError;
+    // Did this failed run leave the project different from its checkpoint?
+    const current = get();
+    const failed = current.sessions.find((s) => s.id === sid);
+    const failedTurn = failed
+      ? [...failed.messages].reverse().find((m) => m.kind === 'assistant' && m.turn.id === turnId)
+      : undefined;
+    const checkpointId =
+      failedTurn && failedTurn.kind === 'assistant' ? failedTurn.turn.checkpoint?.id : undefined;
+    const record = checkpointId ? getCheckpoint(checkpointId) : undefined;
+    const changed = record ? diffContents(record.files, current.fileContents).total : 0;
     set((s) => ({
       sessions: patchTurn(s.sessions, sid, turnId, (t) => {
         t.running = false;
@@ -886,10 +1074,12 @@ async function runLive(
           details: noModel ? message : ERROR_HINT[code],
           code: noModel ? 'no-model' : undefined,
         };
+        t.recovery = changed && !stopped ? { changed } : undefined;
       }).map((x) => (x.id === sid ? { ...x, status: stopped ? ('idle' as const) : ('error' as const) } : x)),
     }));
   } finally {
     liveControllers.delete(turnId);
+    drainQueue(get);
   }
 }
 

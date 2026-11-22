@@ -25,6 +25,7 @@ import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import type { AssistantTurn, Group, Message, Permission, ToolKind } from '../lib/types';
 import { useI18n } from '../lib/i18n';
+import { diffContents, getCheckpoint } from '../lib/checkpoints';
 import { Badge, Btn, Dialog, Logo, Progress, Tip, fmtDur, useNow } from './ui';
 
 /* ------------------------------ markdown ------------------------------ */
@@ -219,39 +220,55 @@ function ActivityGroup({ group }: { group: Group }) {
 }
 
 /* ------------------------------ blocks ------------------------------ */
-function CheckpointMarker() {
+function CheckpointMarker({ turn }: { turn: AssistantTurn }) {
   const { t } = useI18n();
-  const toast = useStore((s) => s.toast);
+  const files = useStore((s) => s.fileContents);
+  const restore = useStore((s) => s.restoreCheckpoint);
   const [open, setOpen] = useState(false);
+  const [scope, setScope] = useState<'both' | 'code' | 'chat'>('both');
+  const checkpoint = turn.checkpoint;
+  if (!checkpoint) return null;
+  const record = getCheckpoint(checkpoint.id);
+  const changed = record ? diffContents(record.files, files).total : 0;
+  const count = checkpoint.files;
+  const filesLabel = t(count === 1 ? 'checkpoint.fileOne' : 'checkpoint.files', { count });
+  const scopes = [
+    { value: 'both' as const, label: t('checkpoint.scopeBoth') },
+    { value: 'code' as const, label: t('checkpoint.scopeCode') },
+    { value: 'chat' as const, label: t('checkpoint.scopeChat') },
+  ];
   return (
     <>
       <div className="group flex items-center gap-2 my-2 text-[13px] text-[var(--faint)]">
         <span className="h-px flex-1 border-t border-dashed" style={{ borderColor: 'var(--line-strong)' }} />
         <span className="flex items-center gap-1.5">
           <History size={14} />
-          {t('chat.checkpoint')}
+          {t('chat.checkpoint')} · {filesLabel}
         </span>
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-[var(--muted)] hover:text-[var(--text)] px-1"
-        >
-          {t('chat.restore')}
-        </button>
+        {record ? (
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-[var(--muted)] hover:text-[var(--text)] px-1"
+          >
+            {t('chat.restore')}
+          </button>
+        ) : null}
         <span className="h-px flex-1 border-t border-dashed" style={{ borderColor: 'var(--line-strong)' }} />
       </div>
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        title="Restore checkpoint"
+        title={t('checkpoint.title')}
         footer={
           <>
             <Btn variant="ghost" onClick={() => setOpen(false)}>{t('common.cancel')}</Btn>
             <Btn
               variant="primary"
+              disabled={!record}
               onClick={() => {
+                restore(turn.id, scope);
                 setOpen(false);
-                toast('Restored 7 files', 'Undo', () => toast('Restore undone'));
               }}
             >
               {t('chat.restore')}
@@ -260,18 +277,64 @@ function CheckpointMarker() {
         }
       >
         <p className="text-[14.5px] text-[var(--muted)] leading-relaxed">
-          7 files will be reverted, 3 untracked files kept.
+          {t('checkpoint.body', { files: filesLabel, changed })}
         </p>
         <div className="mt-4 flex flex-col gap-2">
-          {['Restore code and conversation', 'Restore code only', 'Restore conversation only'].map((label, i) => (
-            <label key={label} className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer" style={{ border: '1px solid var(--line)' }}>
-              <input type="radio" name="scope" defaultChecked={i === 0} className="accent-[var(--accent)]" />
-              <span className="text-[15px]">{label}</span>
+          {scopes.map((option) => (
+            <label
+              key={option.value}
+              className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer"
+              style={{ border: '1px solid var(--line)' }}
+            >
+              <input
+                type="radio"
+                name={`scope-${checkpoint.id}`}
+                checked={scope === option.value}
+                onChange={() => setScope(option.value)}
+                className="accent-[var(--accent)]"
+              />
+              <span className="text-[15px]">{option.label}</span>
             </label>
           ))}
         </div>
       </Dialog>
     </>
+  );
+}
+
+function RecoveryCard({ turn }: { turn: AssistantTurn }) {
+  const { t } = useI18n();
+  const restore = useStore((s) => s.restoreCheckpoint);
+  const dismiss = useStore((s) => s.dismissRecovery);
+  if (!turn.recovery) return null;
+  const count = turn.recovery.changed;
+  const filesLabel = t(count === 1 ? 'recovery.fileOne' : 'recovery.files', { count });
+  return (
+    <div
+      className="my-2 p-3"
+      style={{
+        border: '1px solid color-mix(in srgb, var(--warning) 55%, transparent)',
+        background: 'color-mix(in srgb, var(--warning) 9%, transparent)',
+        borderRadius: 14,
+      }}
+      role="alert"
+    >
+      <div className="flex items-center gap-2 font-semibold text-[14.5px]">
+        <Undo2 size={17} style={{ color: 'var(--warning)' }} />
+        {t('recovery.title')}
+      </div>
+      <p className="text-[13.5px] text-[var(--muted)] mt-1.5">
+        {t('recovery.body', { files: filesLabel })}
+      </p>
+      <div className="flex flex-wrap gap-2 mt-3">
+        <Btn size="sm" variant="primary" onClick={() => restore(turn.id, 'code')}>
+          {t('recovery.restore')}
+        </Btn>
+        <Btn size="sm" variant="ghost" onClick={() => dismiss(turn.id)}>
+          {t('recovery.keep')}
+        </Btn>
+      </div>
+    </div>
   );
 }
 
@@ -460,7 +523,7 @@ function AssistantMessage({ turn, onComment }: { turn: AssistantTurn; onComment:
 
   return (
     <div className="animate-fadeUp">
-      {turn.checkpoint ? <CheckpointMarker /> : null}
+      {turn.checkpoint ? <CheckpointMarker turn={turn} /> : null}
       <button
         type="button"
         onClick={() => toggle(turn.id, !turn.collapsed)}
@@ -501,6 +564,7 @@ function AssistantMessage({ turn, onComment }: { turn: AssistantTurn; onComment:
             </div>
           ) : null}
           <ErrorBlock turn={turn} />
+          <RecoveryCard turn={turn} />
         </div>
       </div>
       {turn.final ? (
