@@ -1,4 +1,4 @@
-import { createProjectFs, decode, type ProjectFS } from '../storage/projectFs';
+import { createProjectFs, decode, parentPath, type ProjectFS } from '../storage/projectFs';
 
 /**
  * One persisted project FS per chat session. The agent's tools read and write
@@ -30,6 +30,37 @@ export async function mountProjectFiles(
     written++;
   }
   return written;
+}
+
+/**
+ * Deletes paths from the project FS and prunes folders that become empty, so
+ * an agent turn cannot read a file the store no longer has. Returns the number
+ * of files that were actually there.
+ */
+export async function removeProjectPaths(fs: ProjectFS, paths: string[]): Promise<number> {
+  let removed = 0;
+  for (const path of paths) {
+    const stat = await fs.stat(path).catch(() => undefined);
+    if (!stat) continue;
+    await fs.remove(path, { recursive: true }).catch(() => undefined);
+    if (stat.type === 'file') removed++;
+    let parent = parentPath(path);
+    while (parent) {
+      const entries = await fs.list(parent).catch(() => []);
+      if (entries.length) break;
+      await fs.remove(parent).catch(() => undefined);
+      parent = parentPath(parent);
+    }
+  }
+  return removed;
+}
+
+/** Removes paths from the session's FS; a missing FS is not an error. */
+export function removeProjectFiles(sessionId: string, paths: string[]): Promise<number> {
+  if (!paths.length) return Promise.resolve(0);
+  return projectFsFor(sessionId)
+    .then((fs) => removeProjectPaths(fs, paths))
+    .catch(() => 0);
 }
 
 export async function readProjectFile(fs: ProjectFS, path: string): Promise<string | undefined> {

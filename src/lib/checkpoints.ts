@@ -85,6 +85,21 @@ export function clearCheckpoints(): void {
   store.clear();
 }
 
+/** Every checkpoint, oldest first, for the profile snapshot and the archive. */
+export function exportCheckpoints(): Checkpoint[] {
+  return [...store.values()].sort((a, b) => a.at - b.at || a.seq - b.seq);
+}
+
+/** Replaces the in-memory history with a saved one (hydrate or import). */
+export function restoreCheckpoints(list: Checkpoint[]): void {
+  store.clear();
+  for (const checkpoint of list) {
+    if (!checkpoint || typeof checkpoint.id !== 'string') continue;
+    store.set(checkpoint.id, { ...checkpoint, files: { ...checkpoint.files } });
+    if (typeof checkpoint.seq === 'number') sequence = Math.max(sequence, checkpoint.seq);
+  }
+}
+
 /** Rebuilds the file tree from a flat path → contents map. */
 export function treeFromContents(contents: Record<string, string>): FileNode[] {
   const root: FileNode[] = [];

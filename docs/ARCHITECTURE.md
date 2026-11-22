@@ -41,9 +41,11 @@ UI (React) ──► store.send ──► lib/agentClient.local.ts ──► eng
 | `src/storage/migrations.ts` | Numbered, pure data migrations. |
 | `src/lib/agentClient.local.ts` | Implements the live turn for the UI using the registry and the session's persisted `ProjectFS`; mounts the editor's files before the turn and reports every write back. |
 | `src/lib/projectBridge.ts` | One cached `ProjectFS` per session (`createProjectFs`) plus `mountProjectFiles`/`readProjectFile`, shared by the agent and the store. |
-| `src/lib/checkpoints.ts` | Per-turn file snapshots (capped, in memory), `diffContents` and `treeFromContents` for restore. |
+| `src/lib/checkpoints.ts` | Per-turn file snapshots (capped at 20 per session), `diffContents`, `treeFromContents`, and `exportCheckpoints`/`restoreCheckpoints` for the profile snapshot. |
+| `src/lib/persist.ts` | One profile snapshot in IndexedDB (`meta/profile` in `freecode:local`): sessions, active chat, files and checkpoints. Hydrates before the first render, autosaves on a debounce and on `pagehide`. |
+| `src/lib/archive.ts` | The `.freecode` ZIP (fflate): `manifest.json` + `files/<path>`, with path checks on both export and import. |
 | `src/lib/providersStore.ts` | Provider configs in `localStorage`; keys in the vault. |
-| `src/lib/backup.ts` | Local backup export/import (JSON). |
+| `src/lib/backup.ts` | Reads the older JSON backup format (still accepted on import). |
 | `src/lib/brandLogos.ts` | `simple-icons` marks keyed by our integration/provider ids, their brand hex, and `NO_BRAND_LOGO` for the brands the package does not ship. |
 | `src/components/ServiceLogo.tsx` | `BrandGlyph`, the integrations `ServiceTile` and the provider `ProviderMark`; monogram/generic fallback when no mark exists. |
 | `src/components/CodeEditor.tsx` | CodeMirror 6 editor + `@codemirror/merge` compare view. Reached only through `lazy()` from `ToolPane`. |
@@ -74,4 +76,6 @@ The registry itself serializes requests per provider (`SerialQueue`) and retries
 - IndexedDB database `freecode:<profileId>`, stores listed in `src/storage/db.ts`.
 - Project files: OPFS at `/profiles/<pid>/projects/<projectId>/tree/…`, with an IndexedDB fallback that persists an in-memory snapshot.
 - Vault: non-extractable AES-GCM key in IndexedDB (`vaultKeys`), encrypted items in `vaultItems`.
-- Backup format (this build): a JSON file `{ format:"freecode-backup", version:1, createdAt, settings, sessions }`. The ZIP `.freecode` format from the engine spec is not implemented yet.
+- Profile: `meta/profile` holds `{ version, savedAt, activeSessionId, sessions, files, fileContents, checkpoints }`, written by `lib/persist.ts`. `main.tsx` loads it before rendering.
+- Backup format: a `.freecode` ZIP with `manifest.json` (`format:"freecode"`, `version:1`, `createdAt`, `activeSessionId`, `settings`, `sessions`, `checkpoints`) and `files/<path>` entries. The settings import still accepts the older `{ format:"freecode-backup", version:1 }` JSON.
+- PWA: `public/manifest.webmanifest` plus `public/sw.js` (shell precache, network-first navigations, cache-on-use assets), registered only in production builds.

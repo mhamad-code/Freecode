@@ -75,13 +75,17 @@ export class MemoryFS implements ProjectFS {
 
   async remove(path: string, opts: { recursive?: boolean } = {}): Promise<void> {
     const safe = safePath(path);
+    if (!safe) throw new Error('Cannot remove the root');
     const prefix = `${safe}/`;
+    // The entry itself is deleted too; removing only its descendants left the
+    // file in place (and persisted it back through the IndexedDB fallback).
+    const exact = this.files.has(safe) ? [safe] : [];
     const children = [...this.files.keys()].filter((p) => p.startsWith(prefix));
     const childDirs = [...this.dirs].filter((p) => p === safe || p.startsWith(prefix));
-    if ((children.length || childDirs.length > 1) && !opts.recursive) {
+    if ((exact.length || children.length || childDirs.length > 1) && !opts.recursive) {
       throw new Error('Directory is not empty; pass recursive to remove it');
     }
-    for (const p of children) this.files.delete(p);
+    for (const p of [...exact, ...children]) this.files.delete(p);
     for (const dir of childDirs) this.dirs.delete(dir);
   }
 

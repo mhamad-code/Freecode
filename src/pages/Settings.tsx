@@ -52,7 +52,16 @@ import {
 } from '../components/ui';
 import { RuntimeStatus } from '../components/RuntimeBanner';
 import ProvidersTab from './ProvidersTab';
-import { exportBackup, readBackup } from '../lib/backup';
+import { readBackup } from '../lib/backup';
+import {
+  archiveName,
+  buildArchive,
+  downloadArchive,
+  isArchive,
+  readArchive,
+} from '../lib/archive';
+import { applySnapshot } from '../lib/persist';
+import { exportCheckpoints, treeFromContents } from '../lib/checkpoints';
 
 const TABS = [
   { id: 'general', icon: SlidersHorizontal },
@@ -99,19 +108,43 @@ function GeneralTab() {
 
   const doExport = () => {
     const st = useStore.getState();
-    const name = exportBackup({ settings: st.settings, sessions: st.sessions });
-    toast(`Backup saved: ${name}`);
+    const name = archiveName();
+    downloadArchive(
+      name,
+      buildArchive({
+        settings: st.settings,
+        activeSessionId: st.activeSessionId,
+        sessions: st.sessions,
+        checkpoints: exportCheckpoints(),
+        files: st.fileContents,
+      }),
+    );
+    toast(t('settings.archiveSaved', { name }));
   };
   const doImport = async (file: File) => {
     try {
-      const data = await readBackup(file);
-      useStore.getState().restoreBackup({
-        settings: data.settings as never,
-        sessions: data.sessions as never,
-      });
-      toast('Backup imported');
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (isArchive(bytes)) {
+        const archive = readArchive(bytes);
+        applySnapshot({
+          settings: archive.manifest.settings,
+          activeSessionId: archive.manifest.activeSessionId,
+          sessions: archive.manifest.sessions,
+          checkpoints: archive.manifest.checkpoints,
+          fileContents: archive.files,
+          files: treeFromContents(archive.files),
+        });
+      } else {
+        // Older builds wrote a plain JSON backup: still accepted.
+        const data = await readBackup(file);
+        useStore.getState().restoreBackup({
+          settings: data.settings as never,
+          sessions: data.sessions as never,
+        });
+      }
+      toast(t('settings.imported'));
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Import failed');
+      toast(t('settings.importFailed', { reason: err instanceof Error ? err.message : String(err) }));
     }
   };
 
@@ -225,7 +258,7 @@ function GeneralTab() {
             <input
               ref={fileRef}
               type="file"
-              accept="application/json,.json"
+              accept=".freecode,application/zip,application/json,.json"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];

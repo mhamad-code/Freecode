@@ -88,6 +88,26 @@ Not verified / still missing:
 - **Restore scopes are coarse.** “Conversation only” only drops the messages; “code only”/“both” replace the whole file set with the snapshot, so a file the user edited by hand after the turn is reverted too.
 - Restored and agent-written files reach the container only while the runtime is booted (`syncFile` is a no-op before boot).
 
+## F6 — persistence, `.freecode` export/import, PWA (this build)
+
+Verified in this workspace:
+
+- `npx tsc -b` clean; `npx vitest run` **163/163**, including 13 new tests: `src/lib/__tests__/projectBridge.test.ts` (post-checkpoint files deleted from the FS, folders kept when they still hold a file, empty folders pruned, restored contents win), `src/__tests__/storeRestoreProjectFs.test.ts` (a code restore calls the bridge with exactly the removed paths, a conversation-only restore does not), `src/lib/__tests__/archive.test.ts` (round trip, traversal/absolute entries dropped, only `files/` read back, other formats/versions/damaged JSON refused) and `src/lib/__tests__/persist.test.ts` (snapshot round trip, hydration of chats/files/checkpoints, a running turn loaded as stopped, a newer version ignored).
+- `npm run build` ok: entry 540.6 kB (168.4 kB gzip); `CodeEditor` and `XTerm` stay lazy chunks, `opfs` and `idb` stay separate. `node scripts/check-bundle.mjs` clean.
+- **Real Chromium on the production build** (served by `scripts/serve-dist.mjs` on the isolated preview origin): `crossOriginIsolated === true`; `navigator.serviceWorker.getRegistrations()` reports `/sw.js` active with the page controlled; `link[rel=manifest]` is `/manifest.webmanifest` and that URL answers `application/manifest+json`; `meta[name=theme-color]` was rewritten from the theme's `--bg` token.
+- **Reload keeps the workspace**: created `notes.md` through the Files panel, typed “survives a reload”, saved it, sent a mock turn (`persist this chat`) which produced a checkpoint, waited for the debounce and reloaded. After the reload the tab title, both messages, the `Checkpoint · 1 file` marker, the file in the Files list and the editor's `survives a reload` all came back; the IndexedDB snapshot held `sessions[1]`, `files.notes.md` and `checkpoints[1]`.
+- **Export works on real data**: Settings → General → Export backup downloaded `freecode-2026-11-22.freecode` (1 338 bytes). Unzipped, it contains `manifest.json` (`format: "freecode"`, `version: 1`, 1 session, 1 checkpoint, the active session id) and `files/notes.md` with the saved text.
+- **Import works on real data**: after Reset (empty profile) the archive was sent through the Import file input; the toast read “Backup imported”, the chat returned, and a further reload kept the chat, the checkpoint and `notes.md` with its text.
+- **The checkpoint fix is covered**: restoring code now calls `removeProjectFiles` with the paths the snapshot does not have, so the agent's `ProjectFS` loses them too. While testing this, `MemoryFS.remove()` was found not to delete the file at the given path at all (only its descendants); that is fixed and the IndexedDB fallback persists the deletion.
+
+Not verified / still missing:
+
+- **No offline load was exercised.** The service worker is registered, active and controlling, but the network was not cut, so serving the shell from cache after a failure is untested; the install prompt/PWA installation was not exercised either. Registration happens only in a production build.
+- **Import replaces the profile rather than merging.** The archive's chats, files and checkpoints become the state; nothing is diffed or combined with what was already there (settings are merged over the defaults as before). There is no drag-and-drop import and no partial/folder-only import.
+- **Archive checkpoints are only as good as the archived files.** Each checkpoint's files are embedded in its manifest entry, so a restored checkpoint reverts to those contents, but files referenced only from the checkpoint (and not in `files/`) are not re-created.
+- **Persistence is one profile per device and browser.** Nothing is encrypted in IndexedDB (provider keys stay in the vault), opening two tabs writes the same snapshot, and the last tab to save wins — there is no multi-tab lock.
+- **The saved snapshot is written on a debounce (800 ms) and on `pagehide`.** A hard crash can lose the last moments of a turn. Sessions are stored whole, not incrementally, so very large histories will make each write heavier.
+
 ## F0 — demo data removal (this build)
 
 Verified in this workspace:
@@ -124,11 +144,11 @@ Not verified / still missing:
 - **WebContainers runtime:** implemented in F4 for isolated pages (see the F4 section). On non-isolated pages `RuntimeBanner` still reports limited mode and the terminal/no-runtime path stays active.
 - **The development preview (`*.style.dev`) is not cross-origin isolated**, so it will always show the limited banner.
 - **Git, GitHub REST, MCP, integrations, skills execution and OAuth are not implemented.** The panel remains a UI mock for those areas.
-- **The live agent uses an in-memory project FS** seeded from the mock file contents, per session. Edits do not persist to OPFS and are lost on reload.
-- **Backups are JSON, not the `.freecode` ZIP** described by the engine prompt. Import restores settings and sessions only.
+- **Older notes in this file are historical.** The live agent now uses the session's persisted `ProjectFS` (F5), restore clears it (F6), and backups are `.freecode` ZIP archives again (F6, with the old JSON still accepted on import).
+- **Backups contain the project and the chats, not the provider keys.** Keys stay in the vault and are never written into an archive.
 - **Passphrase lock** is exposed as crypto helpers (`createVerifier`/`verifyPassphrase`) but is not wired into a lock screen; the vault always uses the device key.
 - **Model catalog is empty until refreshed.** In real mode an empty or untested catalog now produces the "No working free model right now" card with Add my key / Retry instead of the demo scenario. The demo scenario is reachable only with `?mock=1`.
 - **Unverified pricing is hidden by default.** Models whose catalog entry has no `free` flag, zero pricing or `:free` suffix are listed only under "Show all"; the LLM7 catalog currently declares no pricing, so its models rely on that list (or on an explicit selection) even though the service is keyless.
 - **HTTP 403 vs CORS cannot always be separated.** When a JSON endpoint rejects both the CORS and the `no-cors` probe (Chrome's ORB), the app reports a network failure even though DevTools shows a missing `Access-Control-Allow-Origin`. Kilo is currently in this state.
 - **Free-provider consent dialog** is not implemented as a blocking dialog; the Providers tab explains that keys stay on device, but the "shared free service" consent copy is not shown on first use.
-- **Provider request log, usage accounting from real usage, compaction, recovery card, multi-tab locks, PWA, CSP enforcement, and the 5 templates are not implemented.**
+- **Provider request log, usage accounting from real usage, compaction, multi-tab locks, CSP enforcement and the 5 templates are not implemented.**

@@ -32,6 +32,7 @@ import { isMockMode } from './lib/modelCatalog';
 import type { PermissionMode } from './engine/agent/permissions';
 import { ERROR_HINT, ProviderError } from './engine/providers/errors';
 import { removeFile, syncFile } from './runtime/workspace';
+import { removeProjectFiles } from './lib/projectBridge';
 import {
   captureCheckpoint,
   diffContents,
@@ -132,6 +133,14 @@ interface AppStore {
   setSetting: <K extends keyof Settings>(k: K, v: Settings[K]) => void;
   resetSettings: () => void;
   restoreBackup: (payload: { settings?: Partial<Settings>; sessions?: Session[] }) => void;
+  /** Loads a saved profile: chats, active chat, project files and settings. */
+  hydrate: (payload: {
+    sessions: Session[];
+    activeSessionId?: string;
+    files?: FileNode[];
+    fileContents?: Record<string, string>;
+    settings?: Partial<Settings>;
+  }) => void;
 
   mode: 'code' | 'chat';
   setMode: (m: 'code' | 'chat') => void;
@@ -265,6 +274,27 @@ export const useStore = create<AppStore>((set, get) => ({
       sessions: payload.sessions?.length ? payload.sessions : s.sessions,
       activeSessionId: payload.sessions?.length ? payload.sessions[0].id : s.activeSessionId,
     })),
+  hydrate: (payload) =>
+    set((s) => {
+      const active =
+        payload.activeSessionId && payload.sessions.some((x) => x.id === payload.activeSessionId)
+          ? payload.activeSessionId
+          : payload.sessions[0].id;
+      return {
+        sessions: payload.sessions,
+        activeSessionId: active,
+        settings: payload.settings ? { ...s.settings, ...payload.settings } : s.settings,
+        ...(payload.fileContents
+          ? {
+              fileContents: payload.fileContents,
+              // An older snapshot may carry contents but no tree: rebuild it.
+              files: payload.files?.length ? payload.files : treeFromContents(payload.fileContents),
+            }
+          : payload.files
+            ? { files: payload.files }
+            : {}),
+      };
+    }),
   resetSettings: () => {
     const fresh = newChatSession();
     set({
@@ -609,6 +639,9 @@ export const useStore = create<AppStore>((set, get) => ({
     const removed = Object.keys(state.fileContents).filter((path) => !(path in files));
 
     if (scope === 'code' || scope === 'both') {
+      // The agent reads the project FS, not the store: a file created after the
+      // checkpoint has to disappear there too or the next turn still sees it.
+      void removeProjectFiles(sid, removed);
       for (const path of removed) {
         void removeFile(path);
       }
